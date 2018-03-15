@@ -4,7 +4,7 @@
 # (c) 2018 Georg Lehner <jorge-odmon@at.anteris.net>
 # Share and use it as you like, but don't blame me-
 
-set version 0.1.0
+set version 0.1.1
 
 package require Tk
 package require http
@@ -95,7 +95,8 @@ set config(drives) me
 set config(me,name) OneDrive
 set config(me,confdir) [file join ~ .config onedrive]
 # find drive directories
-foreach drive [glob -types d -tails -dir [file join ~ .config onedrive] *] {
+foreach drive [glob -nocomplain \
+	       -types d -tails -dir [file join ~ .config onedrive] *] {
     if {[z-base-32-check $drive]} {
 	lappend config(drives) $drive
 	set config($drive,confdir) [file join ~ .config onedrive $drive]
