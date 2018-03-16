@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=odmon
+Comment=OneDrive Monitor
+Exec=/usr/local/bin/odmon.tcl
+Icon=/usr/local/share/odmon/dock_icon.gif
+Path=
+Terminal=false
+StartupNotify=false
+Categories=Utility;
