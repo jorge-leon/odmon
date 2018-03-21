@@ -1,4 +1,6 @@
-#!/usr/bin/wish
+#!/bin/sh
+# the next line restarts using tclsh \
+    exec tclsh "$0" ${1+"$@"}
 
 # (c) 2018 Georg Lehner <jorge-odmon@at.anteris.net>
 # Share and use it as you like, but don't blame me-
@@ -11,26 +13,29 @@
 # - add button to launch tail -F in an xterm
 # - try hard to find xterm executable
 #
-# Drive detection is no factored out from odmon.tcl, odopen.tcl is the
+# Drive detection is now factored out from odmon.tcl, odopen.tcl is the
 # original odmon.tcl and should be trimmed for drive detection.
+# leg20180321:
+# - can read configfile ~/.config/onedrive/odmon.conf, see sample file
+#   for syntax and parameters
 
+# ToDo:
+#
+# - reestablish tray icon animation via logfile filter
+# - start/stop drive: use $config($drive,enable) to decide if drive has
+#   to be started on program start.
+# - be able to resync drive.
+# - rotate logs
+#
+# - Add new drives
+#   - by hand, giving parameters
+#   - via odopen:// url from browser.
+# - Configure drives via gui
+#   - enable, skip
+#   - directories to sync
 
-# ToDo
-#
-# reestablish tray icon animation via logfile filter
-# read configuration file with overrides
-# start/stop drive
-# rotate logs
-#
-#
-#
-# Add new drives
-# Configure drives via gui
+set version 0.1.3
 
-set version 0.1.2
-
-package require Tk
-			  
 set commandline ""
 
 set config(clientId) "22c49a0d-d21c-4792-aed1-8f163c982546"
@@ -41,11 +46,8 @@ set odmon_app_photo "R0lGODdhFAAUAKECABh0zR13zv///////ywAAAAAFAAUAAACQZSAqRZolt5
 set config(tray,balloon,timeout) 3000; # milliseconds
 set config(tray,warn,timeout) 1000; # milliseconds
 
-set config(drives) me
-set config(me,name) OneDrive
-set config(me,confdir) [file join ~ .config onedrive]
-
 set config(tray) [expr {![catch {package require tktray}]}]
+set config(tray) false
 
 if {$config(tray)} {
     set config(window,state) withdrawn
@@ -55,6 +57,8 @@ if {$config(tray)} {
     
 set config(tray,warn,active) {}
 set config(tray,uploading) 0
+
+set config(X) [info exists env(DISPLAY)]
 
 set config(log,xterms) {
     {xfce4-terminal -T {$title} --hold --hide-menubar --hide-toolbar -x}
@@ -69,6 +73,46 @@ set config(log,xterms) {
 
 ### Tcl
 proc set* {var args} {uplevel set $var [list $args]}
+proc K* args {lindex $args 0}
+
+# read file into memory
+proc slurp fn {
+    K* [read [set fd [open $fn r]]] \
+	[close $fd]
+}
+
+# config file parser
+
+proc iniParse {ini confVar} {
+    upvar $confVar config
+    set section ""
+    set config(sections) {}
+    set config(error) {}
+    set lineo 0
+    foreach line [split $ini \n] {
+	incr lineo
+	set line [string trim $line]
+	if {![set len [string length $line]]} continue
+	if {[string index $line 0] in {\# ; /}} continue
+	if {$len < 3} {
+	    lappend config(error) "$lineo: short line"
+	    continue
+	}
+	if {[string index $line 0] eq "\["
+	    && [string index $line end] eq "\]"} {
+	    set section [string range $line 1 end-1]
+	    lappend config(sections) $section
+	    append section ,
+	    continue
+	}	
+	if {[llength [lassign [split $line =] key value]]} {
+	    lappend config(error) "$lineo: multiple = characters"
+	    continue
+	}
+	set config($section[string trimright $key]) [string trimleft $value]
+    }
+    return
+}
 
 # z-base-32
 proc z-base-32-encode str {
@@ -208,13 +252,7 @@ proc notify_changes {drive destination line} {
 
 proc new_drive drive {
     global config
-    
-    log new_drive $config($drive,name)
-
-    if {![info exists config($drive,logfile)]} {
-	set config($drive,logfile) \
-	    [file join $config($drive,confdir) onedrive.log]
-    }
+       
     if {[catch {open $config($drive,logfile) a} l]} {
 	log error opening logfile, logging to stderr: $l
 	set l stderr
@@ -234,16 +272,14 @@ proc new_drive drive {
     set config($drive,PID) [pid $f]
     set config($drive,uploading) false
 
-#||    set logdest [new_drive_tab $drive]
-    set config($drive,tab) [new_drive_tab $drive]
-
-#||    logto $logdest $cmd 
+    if {$config(X)} {
+	set config($drive,tab) [new_drive_tab $drive]
+    }
     
     fconfigure $f -blocking false
     #|| add a modified notify_changes as filter
     fileevent $f readable [list pipeto $drive]
 
-    lappend config(drives) $drive
 }
 
 proc show_log drive {
@@ -292,18 +328,23 @@ proc new_drive_tab drive {
 	-side left
 }
 
-proc remove_drive drive {
+proc unconfig drive {
     global config
     
-    log remove_drive $drive
     foreach name [array names config $drive,*] {
 	unset config($name)
     }
     # remove drive from drive list
     # http://wiki.tcl.tk/15659
     set config(drives) [lsearch -all -inline -not -exact $config(drives) $drive]
+}
 
+proc remove_drive drive {
+    global config
+    
+    log remove_drive $drive
     destroy .tabs.$drive
+    unconfig $drive
 }
 
 proc repl {} {
@@ -316,7 +357,6 @@ proc repl {} {
 proc reap {} {
     foreach chan [chan names file*] {
 	close $chan
-	puts stderr "$chan closed"
     }
 }
 
@@ -466,18 +506,102 @@ if $config(tray) {
     bind .tray <Button-3> {shutdownInteractive true}
 }
 
-# find drive directories
-set drives {}
-foreach drive [glob -nocomplain \
-	       -types d -tails -dir [file join ~ .config onedrive] *] {
-    if {[z-base-32-check $drive]} {
-	lappend drives $drive
-	set config($drive,confdir) [file join ~ .config onedrive $drive]
-	set config($drive,name) [string trimright [z-base-32-decode $drive] \0]
+if {$config(X)} {
+    package require Tk
+    screen
+} else {
+    proc log args {
+	puts stderr [join $args]
+	
     }
 }
 
-foreach drive $drives {after idle new_drive $drive}
+# personal drive
+set config(drives) me
+set config(names) OneDrive
+set config(me,name) OneDrive
+set config(me,confdir) [file join ~ .config onedrive]
+set config(me,logfile) [file join ~ .config onedrive onedrive.log]
+set config(me,enabled) true
+set config(me,skip) false
+
+# find drive directories
+foreach drive [glob -nocomplain -types d -tails \
+		   -dir [file join ~ .config onedrive] *] {
+    lappend config(drives) $drive
+    set config($drive,confdir) [file join ~ .config onedrive $drive]
+    if {[z-base-32-check $drive]} {
+	set config($drive,name) [string trimright [z-base-32-decode $drive] \0]
+    } else {
+	set config($drive,name) $drive
+    }
+    lappend config(names) $config($drive,name)
+    set config($drive,enabled) true
+    set config($drive,skip) false
+    set config($drive,logfile) [file join $config($drive,confdir) onedrive.log]
+}
+
+# override/add with config file
+proc readIniFile {} {
+    global config
+    
+    if {[catch {slurp [file join ~ .config onedrive odmon.conf]} ini]} {
+	log config file not read: $ini
+	return
+    }
+    iniParse $ini odmConfig
+    foreach line $odmConfig(error) {
+	log config file invalid line:$line
+    }
+
+    if {![llength $odmConfig(sections)]} {
+	log config file info: no drive configured
+	return
+    }
+    foreach section $odmConfig(sections) {
+	set present false
+	if {$section in $config(drives)} {
+	    set present true
+	    set drive $section
+	} elseif {$section in $config(names)} {
+	    set present true
+	    set drive [z-base-32-encode $section]
+	}
+	if {$present && [info exists odmConfig($section,confdir)]} {
+	    log config file error: overriding confdir not allowed: $section
+	}
+	if {!$present} {
+	    if {![info exists odmConfig($section,confdir)]} {
+		log config file error: drive not set up, no confdir for $section
+		continue
+	    }
+	    # set defaults
+	    set confdir $odmConfig($section,confdir)
+	    if {![file isdirectory $confdir]} {
+		log config file error: confdir not a directory, $confdir in $section
+		continue
+	    }
+	    set config($drive,confdir) $confdir
+	    set config($drive,name) $section
+	    set config($drive,logfile) [file join $confdir onedrive.log]
+	    set config($drive,enabled) true
+	    set config($drive,skip) false
+
+	    lappend config(drives) $section
+	}
+	foreach key {enabled logfile name skip} {
+	    if {[info exists odmConfig($section,$key)]} {
+		set config($drive,$key) $odmConfig($section,$key)
+	    }
+	}
+	if {[string index $config($drive,logfile) 0] ni {/ ~}} {
+	    set config($drive,logfile) \
+		[file join $config($drive,confdir) $config($drive,logfile)]
+	}
+    }
+}
+
+readIniFile
 
 # find xterminal emulator
 foreach term $config(log,xterms) {
@@ -488,11 +612,16 @@ foreach term $config(log,xterms) {
     break
 }
 
+foreach drive $config(drives) {
+    if {$config($drive,skip)} {
+	log skipping $config($drive,name)
+	unconfig $drive
+	continue
+    }
+    
+    after idle new_drive $drive
+}
 
-screen
-
-# # http://wiki.tcl.tk/9299
-# proc every {ms cmd} {
-#     {*}$cmd
-#     after $ms [list after idle [info level 0]]
-# }
+if {![info exists ::env(DISPLAY)]} {
+    vwait forever
+}

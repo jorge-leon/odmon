@@ -18,26 +18,30 @@ The *onedrive* program only syncs one drive at once, but you can run
 several instances of *onedrive* to sync several drives.
 
 [*odmon*](http://at.magma-soft.at/darcs/odmon) is a Tcl script, which
-picks up all configured drives and runs odmon* for each of them.  It
-presents an icon in the system tray which indicates synchronization
+picks up all configured drives and runs *onedrive* for each of them.
+It presents an icon in the system tray which indicates synchronization
 activity and can be used to hide/unhide the main window.
 
-*odmon* also allows to configure additional drives.
+*odopen* is a Tcl script, which has functionality for retrieving the
+ driveId of a shared directory in Sharepoint and set it up as a new
+ drive for *odmon*.
 
 
 ## How to install
 
 *odmon* is a single Tcl script, just copy it to your disk and run it.
+The same is valie for *odopen*
 
 Requisites:
 
 - Debian GNU/Linux 9.3
 - Patched *onedrive*
 - Tcl/Tk 8.6
-- tktray package
+- tktray package - optional
 
 It is very likely, that *odmon* will run successfully on a wide range
-of variants of the above.
+of variants of the above, with no or little changes.  Please report
+success and failure on yours.
 
 
 ## How to use
@@ -46,14 +50,61 @@ You must have set up synchronization of your personal drive with
 *onedrive* before you can use *odmon*.  This assures, that a
 refresh_token and a basic configuration is present.
 
-Now run `odopen.tcl` for the following steps:
-When running `odopen.tcl` successfully, the main window pops up, it shows
-two tabs: `odmon` which is the main log window, and `OneDrive`, which
-holds a log window for the synchronization of your personal drive.
+When you run `odmon.tcl` it will read the onedrive configuration
+directory `~/.config/onedrive `and any subdirectories to collect
+drives to monitor. Monitoring settings and additional drive
+directories can be specified in the file
+`~/.config/onedrive/odmon.conf`. Once set up, *odmon* starts
+*onedrive* for each of the configured drives in the background.
 
-A tray icon with the cloudishly distorted letters O, D and M should be
-visible in the system tray.  If you click on the icon, the main window
-hides, if you click again, the main window appears.
+If the tktray package can be loaded, *odmon* installs a tray icon
+which can be used to show/hide the main window (left click) and to
+exit the program (double right click).
+
+If tktray is not available the main window show up.
+
+The main window has an "odmon" tab, with a log window for the
+application.  For each configured drive, a new tab with a "Show Log"
+button is added. This button opens a terminal emulator window showing
+the running log.
+
+
+## The configuration file
+
+After detecting all subdirectories of `~/.config/onedrive` *odmon*
+tries to read the file `~ /.config/onedrive/odmon.conf`.  You can
+disable monitoring of a specific drive and change the path of the
+logfile.
+
+It is also possible to add drives which are configured outside of
+`~/.config/onedrive`, by adding a section which contains at least a
+`confdir` parameter.
+
+The following is a list of recognized parameters:
+
+:name:
+:    used as the name in the GUI
+
+:confdir:
+:    configuration directory to use for `onedrive`.  If specified in a
+	section of an existing drive, this is ignored.
+
+:logfile:
+:    path to the logfile. If it is relative, it is taken relative to
+	the confdir.
+
+:skip:
+:    if set to true, the drive will not be shown in the GUI and not be
+     monitored by *odmon*.
+
+
+## Adding new drives
+
+Note: this part is highly experimental.
+
+The `odopen.tcl` script is similar to *odmon*, but has a feature to
+detect the driveId of a shared directory and to add a *odmon*
+configuration for it.
 
 To add a new drive, open a SharePoint website, select the `Documents`
 section and click on `Synchronization`.  You should get an error
