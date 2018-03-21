@@ -2,7 +2,7 @@
 
 (c) 2018 Georg Lehner <jorge-odmon@at.anteris.net>
 
-Share and use it as you like, but don't blame me-
+Share and use it as you like, but don't blame me.
 
 
 ## What is it
@@ -46,7 +46,8 @@ You must have set up synchronization of your personal drive with
 *onedrive* before you can use *odmon*.  This assures, that a
 refresh_token and a basic configuration is present.
 
-When running *odmon* successfully, the main window pops up, it shows
+Now run `odopen.tcl` for the following steps:
+When running `odopen.tcl` successfully, the main window pops up, it shows
 two tabs: `odmon` which is the main log window, and `OneDrive`, which
 holds a log window for the synchronization of your personal drive.
 
@@ -65,10 +66,14 @@ and be asked if you want to add the drive.  Assent. A new tab with the
 name of the SharePoint group is added and the files are synchronized to
 a sub directory of `~/UCAN/`.
 
-**Note:** The log windows will eat up all available memory in short
-time.  This can be mitigated but not avoided by clearing the log
-windows with the respective `Clear` buttons of the tabs.  Either close
-and reopen *odmon* now and then, or nag me to rewrite *odmon*.
+Now close `odopen.tcl` and start *odmon*.  If the system tray is
+working, you will get the odmon tray icon, the *odmon* main window is
+hidden.  You can open the main window with a single click, and close
+the application with a double right click on the tray icon.  You will
+be asked for confirmation.
+
+The drive tabs now have a "Show log" button, which opens an X terminal
+emulator window showing the running log of the respective drive.
 
 There is a `Command:` entry box on the top of them main windows, which
 allows to execute arbitrary Tcl commands inside the interpreter
@@ -78,20 +83,12 @@ running *odmon*.
 ## What is the status of odmon
 
 *odmon* is a bunch of hastily glued together routines. This is the
-first release to the public, because it does the most basic things
-needed to take advantage of our *onedrive* patches and people have
-asked for it.
+second release to the public, where *odmon* is remade.  It is now just
+a monitor and logging to files.
 
 Since you read the license, I do not need to over stress that it is
 your fault if you loose data or anything consequential by using
 *odmon*.
-
-Tk8.6 leaks memory in the listbox widget we are using for the log
-windows and we do nothing to trim the logs either.  The UX of *odmon*
-is designed to explore *onedrive* and OneDrive, so this is currently a
-marginal problem.  It will go away, either when everything works, or
-somebody goes into the length of working around of it, probably by
-eliding the log functionality in the user interface.
 
 Some important things ToDo:
 
@@ -170,4 +167,5 @@ contents of this file is copy/pasted into the code.
 # Credits
 
 All credits go to skillion for *onedrive* and to Jon Ousterhout and
-fellows for Tcl/Tk.
+fellows for Tcl/Tk.  Thanks to Per Öberg for his feedback on the very
+first version.

@@ -1,64 +1,76 @@
 #!/usr/bin/wish
 
-# leg20180315
 # (c) 2018 Georg Lehner <jorge-odmon@at.anteris.net>
 # Share and use it as you like, but don't blame me-
+# leg20180315
+# leg20180320:
+# - remove all http stuff for drive detection
+# - remove memory monitor
+# - log to file
+# - remove log widget for drives
+# - add button to launch tail -F in an xterm
+# - try hard to find xterm executable
+#
+# Drive detection is no factored out from odmon.tcl, odopen.tcl is the
+# original odmon.tcl and should be trimmed for drive detection.
 
-set version 0.1.1
+
+# ToDo
+#
+# reestablish tray icon animation via logfile filter
+# read configuration file with overrides
+# start/stop drive
+# rotate logs
+#
+#
+#
+# Add new drives
+# Configure drives via gui
+
+set version 0.1.2
 
 package require Tk
-package require http
-package require tls
 			  
 set commandline ""
 
-set config(window,state) normal
-
 set config(clientId) "22c49a0d-d21c-4792-aed1-8f163c982546"
 
-set config(me,access_timeout) 0
-
-foreach {label url} {
-    authUrl https://login.microsoftonline.com/common/oauth2/v2.0/authorize
-    redirectUrl https://login.microsoftonline.com/common/oauth2/nativeclient
-    tokenUrl https://login.microsoftonline.com/common/oauth2/v2.0/token
-    itemByIdUrl https://graph.microsoft.com/v1.0/me/drive/items/
-    itemByPathUrl https://graph.microsoft.com/v1.0/me/drive/root:/
-    driveByIdUrl https://graph.microsoft.com/v1.0/drives/
-    driveUrl https://graph.microsoft.com/v1.0/me/drive
-    siteUrl https://graph.microsoft.com/v1.0/sites/
-} {
-    set config(OneDrive,url,$label) $url
-}
-
-set dock_photo_data "R0lGODdhFAAUAKECABh0zR13zv///////ywAAAAAFAAUAAACQZSAqRZolt5xD0gqod42V9iFVXSJ
+set odmon_app_photo "R0lGODdhFAAUAKECABh0zR13zv///////ywAAAAAFAAUAAACQZSAqRZolt5xD0gqod42V9iFVXSJ
 5TJuoIKxlPvCK6uisgeOdl6jx4ojTXQ8D2nhmxwjMNdM1wSenEqccvfJJHUFADs="
 
-
-set config(tray,balloon,timeout) 300; # milliseconds
-set config(tray) [expr {![catch {package require tktray}]}]
+set config(tray,balloon,timeout) 3000; # milliseconds
 set config(tray,warn,timeout) 1000; # milliseconds
+
+set config(drives) me
+set config(me,name) OneDrive
+set config(me,confdir) [file join ~ .config onedrive]
+
+set config(tray) [expr {![catch {package require tktray}]}]
+
+if {$config(tray)} {
+    set config(window,state) withdrawn
+} else {
+    set config(window,state) normal
+}
+    
 set config(tray,warn,active) {}
 set config(tray,uploading) 0
 
-if $config(tray) {
-
-    image create bitmap ::img::bitmap::dock_icon \
-	-foreground white -background DodgerBlue3 \
-	-data {
-#define dock_icon_20x20_1_width 20
-#define dock_icon_20x20_1_height 20
-static unsigned char dock_icon_20x20_1_bits[] = {
-   0x03, 0x30, 0x0e, 0xf1, 0x78, 0x0f, 0xfc, 0xdb, 0x0d, 0xfe, 0x9b, 0x0d,
-   0x0e, 0x9f, 0x0d, 0x07, 0x9e, 0x0d, 0x03, 0x1c, 0x00, 0x03, 0x0c, 0x00,
-   0x03, 0xec, 0x00, 0x03, 0xfe, 0x03, 0x07, 0x36, 0x07, 0x07, 0x37, 0x0e,
-   0x8f, 0x73, 0x0c, 0xfc, 0x63, 0x08, 0xf0, 0x60, 0x08, 0x00, 0x60, 0x08,
-   0x03, 0x60, 0x0c, 0x07, 0x30, 0x0e, 0x1f, 0xb0, 0x07, 0x3f, 0xfc, 0x01 };
-	}
-
-    tktray::icon .tray -image ::img::bitmap::dock_icon
+set config(log,xterms) {
+    {xfce4-terminal -T {$title} --hold --hide-menubar --hide-toolbar -x}
+    {x-terminal-emulator -T {$title} -x}
+    {xterm -T {$title} -x}
+    {gnome-terminal --hide-menubar -e}
+    {konsole --hold --hide-menubar --hide-tabbar -e}
+    {xvt -T {$title} -e}
+    {rxvt -title {$title} -e}
+    {mrxvt -title {$title} -hold 0x06 -e}
 }
 
+### Tcl
+proc set* {var args} {uplevel set $var [list $args]}
+
+# z-base-32
 proc z-base-32-encode str {
 
     binary scan $str b* bits
@@ -91,24 +103,7 @@ proc z-base-32-check str {
     } $str] eq ""}
 }
 
-set config(drives) me
-set config(me,name) OneDrive
-set config(me,confdir) [file join ~ .config onedrive]
-# find drive directories
-foreach drive [glob -nocomplain \
-	       -types d -tails -dir [file join ~ .config onedrive] *] {
-    if {[z-base-32-check $drive]} {
-	lappend config(drives) $drive
-	set config($drive,confdir) [file join ~ .config onedrive $drive]
-	set config($drive,name) [string trimright [z-base-32-decode $drive] \0]
-    }
-}
-
-
-# Tcl
-proc set* {var args} {uplevel set $var [list $args]}
-
-###proc clear textWidget {$textWidget delete 0.0 end}
+# Log Widget
 proc clear logWidget {$logWidget delete 0 end}
 
 proc logto {destination args} {
@@ -133,10 +128,29 @@ proc logpipeto {chan destination {filter {}}} {
 
 proc log args {logto $::config(odmon,logWidget) {*}$args}
 
+
+# log files
+proc unfiltered {inch out line} {puts $out $line}
+
+proc pipeto {drive {filter unfiltered}} {
+    global config
+
+    set inch $config($drive,chan)
+    if {[gets $inch line]==-1} {
+	if {[eof $inch]} {
+	    close $inch
+	    set config($drive,chan) {}
+	}
+	return
+    }
+    $filter $inch $config($drive,logfd) $line
+}
+
+### Tray icon animation
 proc reset_tray {} {
     global config
 
-    ::img::bitmap::dock_icon configure -foreground white
+    ::img::bitmap::tray_icon configure -foreground white
     set config(tray,warn,active) {}
 }
 
@@ -177,7 +191,7 @@ proc notify_changes {drive destination line} {
 	set config(tray,warn,active) {}
     }
     if {$prefix eq "Uploading fragment: *"} {
-	::img::bitmap::dock_icon configure -foreground gold
+	::img::bitmap::tray_icon configure -foreground gold
 	if {!$config($drive,uploading)} {
 	    set config($drive,uploading) true
 	    incr config(tray,uploading)
@@ -185,7 +199,7 @@ proc notify_changes {drive destination line} {
 	return $line
     }
         
-    ::img::bitmap::dock_icon configure -foreground gold
+    ::img::bitmap::tray_icon configure -foreground gold
     set config(tray,warn,active) \
 	[after $config(tray,warn,timeout) reset_tray]
     
@@ -195,46 +209,65 @@ proc notify_changes {drive destination line} {
 proc new_drive drive {
     global config
     
-    log new_drive $drive
+    log new_drive $config($drive,name)
 
+    if {![info exists config($drive,logfile)]} {
+	set config($drive,logfile) \
+	    [file join $config($drive,confdir) onedrive.log]
+    }
+    if {[catch {open $config($drive,logfile) a} l]} {
+	log error opening logfile, logging to stderr: $l
+	set l stderr
+    } else {
+	fconfigure $l -buffering line
+    }
+    
     set* cmd onedrive --confdir $config($drive,confdir) -m -v
+    puts $l "starting: [join $cmd]"
+
     if {[catch {open "| [join $cmd] 2>@1" r+} f]} {
-	log error " " $f 
+	log error running monitor, giving up: $f 
 	return
     }
     set config($drive,chan) $f
+    set config($drive,logfd) $l
     set config($drive,PID) [pid $f]
     set config($drive,uploading) false
 
-    set logdest [new_drive_tab $drive]
+#||    set logdest [new_drive_tab $drive]
+    set config($drive,tab) [new_drive_tab $drive]
 
-
-    logto $logdest $cmd 
+#||    logto $logdest $cmd 
     
     fconfigure $f -blocking false
-    fileevent $f readable [list logpipeto $f $logdest "notify_changes $drive"]
+    #|| add a modified notify_changes as filter
+    fileevent $f readable [list pipeto $drive]
 
-    if {[catch {open [file join $config($drive,confdir) refresh_token] r} f]} {
-	log Error no refresh_token file for drive: $drive, $f
-	close $config($drive,chan)
-	remove_drive $drive
-	return
-    }
-    set config($drive,token) [read $f]
-    close $f
-
-    log token for $drive: $config($drive,token) 
-
-    # monitor memory info
-    #every 3000 [list logMemInfo $config($drive,PID)]
-    
     lappend config(drives) $drive
 }
 
-proc url_prefix_helper {arrName index op} {
-    lassign [array get $arrName $index] dummy key
-    lassign [split $index ,] drive url_prefix_key
-    array set $arrName [list $drive,url_prefix $::config(OneDrive,url,$key)]
+proc show_log drive {
+    global config
+
+    if {![info exists config(log,term)]} {
+	log warning, could not find xterm executable,\
+	    run 'tail -F $config($drive,logfile)' by yourself.
+	return
+    }
+
+    set title "onedrive log: $config($drive,name)"
+    set* cmd [subst $config(log,term)] \
+	tail -F [file normalize $config($drive,logfile)]
+
+    if {[catch {open "| [join $cmd] 2>@1" r+} f]} {
+	log error starting log window, giving up: $f 
+	return
+    }
+    
+    log show log for $config($drive,name): [join $cmd]
+
+    fconfigure $f -blocking false
+    fileevent $f readable [list logpipeto $f $::config(odmon,logWidget)$f]
 }
 
 proc new_drive_tab drive {
@@ -249,49 +282,14 @@ proc new_drive_tab drive {
     #   pid
     pack [label $w.pid_label -text pid:] -side left
     pack [label $w.pid  -width 7 -textvariable ::config($drive,PID)] -side left
-
-    #   token
-    pack [label $w.token_label -text token:] -side left
-
-    pack [label $w.token -textvariable ::config($drive,token) -width 40] \
-	-side left -fill x -expand 1
     
     # tools frame
     pack [set w [frame .tabs.$drive.tools]] -fill x
 
-    # forward reference    
-    pack [button $w.clear -text Clear \
-	      -command [list clear .tabs.$drive.log.text]] \
+    #  Show log
+    pack [button $w.show_log -text "Show Log" \
+	      -command [list show_log $drive]] \
 	-side left
-    
-    # geturl frame
-    pack [set w [frame .tabs.$drive.geturl]] -fill x
-
-    set tags {}
-    foreach key [array names ::config OneDrive,url,*] {
-	lappend tags [string range $key [string length OneDrive,url,] end]
-    }
-    
-    tk_optionMenu $w.url_prefix_key ::config($drive,url_prefix_key) {*}$tags]
-
-    pack [label $w.url_prefix_url -textvariable ::config($drive,url_prefix)] -side left
-
-    trace add variable ::config($drive,url_prefix_key) write url_prefix_helper
-        
-    # log frame
-    pack [set w [frame .tabs.$drive.log]] -expand 1 -fill both
-    
-    pack [scrollbar $w.hscroll -command [list $w.text xview] \
-	      -orient horizontal] \
-	-side bottom -fill x
-    pack [scrollbar $w.vscroll -command [list $w.text yview]] \
-	-side right -fill y
-    pack [listbox $w.text -relief sunken -bd 2 \
-	      -yscrollcommand [list $w.vscroll set] \
-	      -xscrollcommand [list $w.hscroll set]] \
-	-expand 1 -fill both
-    
-    set config($drive,logWidget) .tabs.$drive.log.text
 }
 
 proc remove_drive drive {
@@ -308,11 +306,6 @@ proc remove_drive drive {
     destroy .tabs.$drive
 }
 
-proc add_button {name label command} {
-    button .top.$name -text $label -command $command
-    pack .top.$name -side left -padx 0p -pady 0 -anchor n
-}
-
 proc repl {} {
     log % $::commandline
     catch {uplevel #0 $::commandline} result
@@ -327,12 +320,23 @@ proc reap {} {
     }
 }
 
+proc shutdownInteractive flag {
+    if {$flag &&
+	[tk_messageBox -message "Exit odmon" \
+	     -icon question -type yesno \
+	     -detail "Really quit?"]
+	eq "no"
+    } return
+    reap
+    exit
+}
+
 proc screen {} {
     global config
     
     # make labels selectable
     bind Label <1> {focus %W}
-
+    
     bind Label <FocusIn> {
 	%W configure -background grey -foreground white
     }
@@ -358,7 +362,7 @@ proc screen {} {
     # create main window
     wm state . $config(window,state)
     wm title . odmon
-    wm iconphoto . [image create photo -data $::dock_photo_data]
+    wm iconphoto . [image create photo -data $::odmon_app_photo]
     
     # close channels/kill subprocesses when closing odmon
     # https://wiki.tcl.tk/9984
@@ -379,13 +383,6 @@ proc screen {} {
     # intermezzo to get back/foreground color
     set config(label,background) [$w.label cget -background]
     set config(label,foreground) [$w.label cget -foreground]
-
-    
-    # drive_id extractor frame
-    pack [set w [frame .odopen]] -fill x
-    pack [button $w.parse -text "odopen?" -command logOdopenResult] -side left
-    pack [entry $w.url -relief sunken -bd 2 -textvariable odopen_url] \
-	-side left -expand 1 -fill x
 
     # Tabs
     pack [ttk::notebook .tabs] -expand 1 -fill both
@@ -427,12 +424,27 @@ proc screen {} {
     focus .line.commandline
 }
 
-
-foreach drive $config(drives) {after idle new_drive $drive}
-
-screen
+### Main
 
 if $config(tray) {
+
+    image create bitmap ::img::bitmap::tray_icon \
+	-foreground white -background DodgerBlue3 \
+	-data {
+	    #define tray_icon_20x20_1_width 20
+	    #define tray_icon_20x20_1_height 20
+	    static unsigned char tray_icon_20x20_1_bits[] = {
+		0x03, 0x30, 0x0e, 0xf1, 0x78, 0x0f, 0xfc, 0xdb,
+		0x0d, 0xfe, 0x9b, 0x0d,	0x0e, 0x9f, 0x0d, 0x07,
+		0x9e, 0x0d, 0x03, 0x1c, 0x00, 0x03, 0x0c, 0x00,
+		0x03, 0xec, 0x00, 0x03, 0xfe, 0x03, 0x07, 0x36,
+		0x07, 0x07, 0x37, 0x0e,	0x8f, 0x73, 0x0c, 0xfc,
+		0x63, 0x08, 0xf0, 0x60, 0x08, 0x00, 0x60, 0x08,
+		0x03, 0x60, 0x0c, 0x07, 0x30, 0x0e, 0x1f, 0xb0,
+		0x07, 0x3f, 0xfc, 0x01 };
+	}
+
+    tktray::icon .tray -image ::img::bitmap::tray_icon
 
     proc toggle_state {} {
 	
@@ -450,230 +462,37 @@ if $config(tray) {
 	    }
 	}
     }
-    
     bind .tray <Button-1> toggle_state
-    
+    bind .tray <Button-3> {shutdownInteractive true}
 }
 
-# http://wiki.tcl.tk/9299
-proc every {ms cmd} {
-    {*}$cmd
-    after $ms [list after idle [info level 0]]
-}
-
-proc logMemInfo pid {
-    global config
-    
-    set* cmd pmap -q $pid
-    if {[catch {open "| [join $cmd] 2>@1" r} f]} {
-	log Error: running pmap $pid: $f 
-	return
+# find drive directories
+set drives {}
+foreach drive [glob -nocomplain \
+	       -types d -tails -dir [file join ~ .config onedrive] *] {
+    if {[z-base-32-check $drive]} {
+	lappend drives $drive
+	set config($drive,confdir) [file join ~ .config onedrive $drive]
+	set config($drive,name) [string trimright [z-base-32-decode $drive] \0]
     }
-    if {[gets $f line]==-1} {
-	log Error: getting first line of pmap $pid
-	close $f
-	return
-    }
-    set config(pmap,$pid,commandline) $line
-    set config(pmap,$pid,mem) 0
-    log pmap: checking $line 
-    while {[gets $f line]!=-1} {
-	set line [string map {\[ "" \] ""} $line]
-	lassign $line addr mem rw process
-	set mem [string range $mem 0 end-1]; # strip trailing K
-	incr config(pmap,$pid,mem) $mem
-	if {[info exists config(pmap,$pid,$addr,mem)]} {
-	    if {$mem != $config(pmap,$pid,$addr,mem)} {
-		log $line 
-		log pmap: $pid $config(pmap,$pid,$addr,process): \
-		    $config(pmap,$pid,$addr,mem) -> $mem 
-		set config(pmap,$pid,$addr,mem) $mem
-	    }
-	} else {
-	    foreach item {mem rw process} {
-		set config(pmap,$pid,$addr,$item) [set $item]
-	    }
-	}
-    }
-    close $f    
 }
 
-# To track own memory usage log memory consumption with pmap [pid] regularily
-every 30000 [list logMemInfo [pid]]
+foreach drive $drives {after idle new_drive $drive}
 
+# find xterminal emulator
+foreach term $config(log,xterms) {
+    set exe [lindex $term 0]
+    if {[catch {exec which $exe}]} continue
 
-# http
-http::register https 443 [list ::tls::socket]
-
-# https://wiki.tcl.tk/13419
-proc json2dict JSONtext {
-string range [
-    string trim [
-        string trimleft [
-            string map {\t {} \n {} \r {} , { } : { } \[ \{ \] \}} $JSONtext
-            ] {\uFEFF}
-        ]
-    ] 1 end-1
-}
-
-# http://wiki.tcl.tk/14144
-proc url-decode str {
-    set str [string map [list + { } "\\" "\\\\"] $str]
-    regsub -all -- {%([A-Fa-f0-9][A-Fa-f0-9])} $str {\\u00\1} str
-    return [subst -novar -nocommand $str]
-}
-
-proc odopen2dict url {
-    
-    if {![string match odopen://sync\?* $url]} {
-	log Error, not a OneDrive url: $url
-	return
-    }
-    set dict {}
-    foreach param [split [string range [url-decode $url] 14 end] &] {
-	set i [string first = $param]
-	set key [string range $param 0 $i-1]
-	set value [string range $param $i+1 end]
-	log $key : $value
-	lappend dict $key $value
-    }
-    return $dict 
-}
-
-proc getDriveData odopen {
-    global config
-
-    set url $config(OneDrive,url,siteUrl)
-    set host [lindex [split [dict get $odopen webUrl] /] 2]
-    append url $host ,
-    # get rid of {}
-    set siteId [string range [dict get $odopen siteId] 1 end-1]
-    append url $siteId ,
-    set webId [string range [dict get $odopen webId] 1 end-1]
-    append url $webId /lists/
-    set listId [string range [dict get $odopen listId] 1 end-1]
-    append url $listId /drive
-
-    getMSApi $url
-}
-
-proc configDrive {sp od} {
-    # sp .. dict with SharePoint site data
-    # od .. dict with OneDrive data
-
-    global config
-
-    set driveName [dict get $sp webTitle]
-    set drive [z-base-32-encode $driveName]
-    log driveName: $driveName
-    log drive: $drive
-    if {[info exists config($drive,name)]} {
-	log Warning: drive $driveName already exists, ignoring data
-	tk_messageBox -icon info -type ok \
-	    -title "Info!" \
-	    -message "Ignoring odopen url!" \
-	    -detail "drive $driveName already exists."
-	return
-    }
-    set config($drive,name) $driveName
-    set config($drive,confdir) [file join ~ .config onedrive $drive]
-    set config($drive,driveId) [dict get $od id]
-    
-    log Warning: pending implementation: get organisation name. setting to UCAN
-    set spOrg UCAN
-
-    # wrong?: get this from od group owner information?
-    set siteName [dict get $sp webTitle]
-  
-    set listName [dict get $od name]
-    set config($drive,syncdir) [file join ~ $spOrg "$siteName - $listName"]
-    set detail "Extracted drive data: \n"
-    set i [string length $drive]; incr i
-    foreach {key value} [array get config $drive,*] {
-	log ${key}: $value
-	append detail [string range $key $i end] ": " $value \n
-    }
-    set answer [tk_messageBox -icon question -type yesno \
-		    -title "Set up Drive?" \
-		    -message "Do you want to configure this drive?" \
-		    -detail $detail]
-    if {$answer eq "yes"} {
-	file mkdir $config($drive,confdir)
-	file copy [file join $config(me,confdir) refresh_token] $config($drive,confdir)
-	set f [open [file join $config($drive,confdir) config] a]
-	puts $f "# odmon [clock format [clock seconds] -format {%+}]
-#
-sync_dir = \"$config($drive,syncdir)\"
-drive_id = \"$config($drive,driveId)\"
-"
-	close $f
-	new_drive $drive
-    } else {
-	# remove from memory so we can check again.
-	foreach key [array names config $drive,*] {
-	    unset config($key)
-	}
-    }
-
-}
-
-proc logOdopenResult {} {
-
-    log Parsing odopen url:
-    set odopen_dict [odopen2dict $::odopen_url]
-    foreach {key value} $odopen_dict {
-	log ${key}: $value 
-    }
-
-    log Getting drive data:
-    set drive_data [getDriveData $odopen_dict]
-
-    configDrive $odopen_dict [json2dict $drive_data]
-    
-}
-
-proc getMSApi url {
-    global config
-
-    if {[clock seconds] >= $config(me,access_timeout)} {
-	access
-    }
-    set headers [list Authorization "Bearer $config(me,access_token)"]
-
-    set token [http::geturl $url -headers $headers]
-    set result [http::data $token]
-    http::cleanup $token
-    dict for {key value} [json2dict $result] {
-	log ${key}: $value 
-    }
-    return $result
-    
-}
-
-proc get {{url_postfix {}}} {
-    
-    set url $config(me,url_prefix)
-    append url $url_postfix
-
-    getMSApi $url
+    set config(log,term) $term
+    break
 }
 
 
-proc access {} {
-    global config
-    
-    set query [http::formatQuery \
-		   client_id $config(clientId) \
-		   redirect_uri $config(OneDrive,url,redirectUrl) \
-		   refresh_token $config(me,token)\
-		   grant_type refresh_token
-		  ]
-    set token [http::geturl $config(OneDrive,url,tokenUrl) -query $query]
-    set result [http::data $token]
-    http::cleanup $token
-    set result_data [json2dict $result]
-    set config(me,access_token) [dict get $result_data access_token]
-    set expiry [dict get $result_data expires_in]
-    set config(me,access_timeout) [expr {[clock seconds] + $expiry}]
-    return [json2dict $result]
-}
+screen
+
+# # http://wiki.tcl.tk/9299
+# proc every {ms cmd} {
+#     {*}$cmd
+#     after $ms [list after idle [info level 0]]
+# }
