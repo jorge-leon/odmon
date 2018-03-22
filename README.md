@@ -97,6 +97,15 @@ The following is a list of recognized parameters:
 :    if set to true, the drive will not be shown in the GUI and not be
      monitored by *odmon*.
 
+You can also set global parameters, they must come before the first
+section.
+
+:xterm:
+:    a commandline string to use for the xterm, must end with -e
+:    example: `xterm -T {$title} -hold -rv -e`
+
+:window,state:
+:    set to `normal` if you want to show the main window on startup
 
 ## Adding new drives
 

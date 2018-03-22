@@ -43,46 +43,46 @@ set config(clientId) "22c49a0d-d21c-4792-aed1-8f163c982546"
 set odmon_app_photo "R0lGODdhFAAUAKECABh0zR13zv///////ywAAAAAFAAUAAACQZSAqRZolt5xD0gqod42V9iFVXSJ
 5TJuoIKxlPvCK6uisgeOdl6jx4ojTXQ8D2nhmxwjMNdM1wSenEqccvfJJHUFADs="
 
-set config(tray,balloon,timeout) 3000; # milliseconds
-set config(tray,warn,timeout) 1000; # milliseconds
+set config(X) \
+    [expr {[info exists env(DISPLAY)]
+	   && ![catch {package require Tk}]
+       }]
 
-set config(tray) [expr {![catch {package require tktray}]}]
-set config(tray) false
+if {$config(X)} {
 
-if {$config(tray)} {
-    set config(window,state) withdrawn
-} else {
-    set config(window,state) normal
-}
+    set config(tray,balloon,timeout) 3000; # milliseconds
+    set config(tray,warn,timeout) 1000; # milliseconds
+
+    set config(tray) [expr {![catch {package require tktray}]}]
+
+    if {$config(tray)} {
+	set config(window,state) withdrawn
+    } else {
+	set config(window,state) normal
+    }
     
-set config(tray,warn,active) {}
-set config(tray,uploading) 0
+    set config(tray,warn,active) {}
+    set config(tray,uploading) 0
 
-set config(X) [info exists env(DISPLAY)]
-
-set config(log,xterms) {
-    {xfce4-terminal -T {$title} --hold --hide-menubar --hide-toolbar -x}
-    {x-terminal-emulator -T {$title} -x}
-    {xterm -T {$title} -x}
-    {gnome-terminal --hide-menubar -e}
-    {konsole --hold --hide-menubar --hide-tabbar -e}
-    {xvt -T {$title} -e}
-    {rxvt -title {$title} -e}
-    {mrxvt -title {$title} -hold 0x06 -e}
+    set config(log,xterms) {
+	{xfce4-terminal -T {$title} --hold --hide-menubar --hide-toolbar -x}
+	{x-terminal-emulator -T {$title} -x}
+	{xterm -T {$title} -e}
+	{gnome-terminal --hide-menubar -e}
+	{konsole --hold --hide-menubar --hide-tabbar -e}
+	{xvt -T {$title} -e}
+	{rxvt -title {$title} -e}
+	{mrxvt -title {$title} -hold 0x06 -e}
+    }
 }
 
 ### Tcl
 proc set* {var args} {uplevel set $var [list $args]}
-proc K* args {lindex $args 0}
 
 # read file into memory
-proc slurp fn {
-    K* [read [set fd [open $fn r]]] \
-	[close $fd]
-}
+proc slurp f {set f [read [set f [open $f r]]][close $f]}
 
 # config file parser
-
 proc iniParse {ini confVar} {
     upvar $confVar config
     set section ""
@@ -147,31 +147,34 @@ proc z-base-32-check str {
     } $str] eq ""}
 }
 
-# Log Widget
-proc clear logWidget {$logWidget delete 0 end}
-
-proc logto {destination args} {
-    $destination insert end [join $args]
-    $destination see end
-}
-
-proc logpipeto {chan destination {filter {}}} {
-    # chan .. channel to read
-    # destination .. text widget, where to append the log line
-    # filter .. procedure to filter/process the log line.
-    if {[gets $chan line]==-1} {
-	if {[eof $chan]} {close $chan}
-	return
+if {!$config(X)} {
+    proc log args {puts stderr [join $args]}
+} else {
+    # Log Widget
+    proc clear logWidget {$logWidget delete 0 end}
+    
+    proc logto {destination args} {
+	$destination insert end [join $args]
+	$destination see end
     }
-    if {[llength $filter]} {
-	set line [{*}$filter $destination $line]
+    
+    proc logpipeto {chan destination {filter {}}} {
+	# chan .. channel to read
+	# destination .. text widget, where to append the log line
+	# filter .. procedure to filter/process the log line.
+	if {[gets $chan line]==-1} {
+	    if {[eof $chan]} {close $chan}
+	    return
+	}
+	if {[llength $filter]} {
+	    set line [{*}$filter $destination $line]
+	}
+	$destination insert end $line
+	$destination see end
     }
-    $destination insert end $line
-    $destination see end
+
+    proc log args {logto $::config(odmon,logWidget) {*}$args}
 }
-
-proc log args {logto $::config(odmon,logWidget) {*}$args}
-
 
 # log files
 proc unfiltered {inch out line} {puts $out $line}
@@ -190,12 +193,56 @@ proc pipeto {drive {filter unfiltered}} {
     $filter $inch $config($drive,logfd) $line
 }
 
-### Tray icon animation
-proc reset_tray {} {
-    global config
+if {$config(X)} {
+    
+    proc toggle_state {} {
+	
+	switch -- [wm state .] {
+	    normal {
+		wm state . withdrawn
+		set config(window,state) withdrawn
+	    }
+	    withdrawn - iconic {
+		wm state . normal
+		set config(window,state) normal
+	    }
+	    default {
+		log Error: invalid window state reported: [wm state .]
+	    }
+	}
+    }
 
-    ::img::bitmap::tray_icon configure -foreground white
-    set config(tray,warn,active) {}
+    proc tray {} {
+	image create bitmap ::img::bitmap::tray_icon \
+	    -foreground white -background DodgerBlue3 \
+	    -data {
+		#define tray_icon_20x20_1_width 20
+		#define tray_icon_20x20_1_height 20
+		static unsigned char tray_icon_20x20_1_bits[] = {
+		    0x03, 0x30, 0x0e, 0xf1, 0x78, 0x0f, 0xfc, 0xdb,
+		    0x0d, 0xfe, 0x9b, 0x0d,	0x0e, 0x9f, 0x0d, 0x07,
+		    0x9e, 0x0d, 0x03, 0x1c, 0x00, 0x03, 0x0c, 0x00,
+		    0x03, 0xec, 0x00, 0x03, 0xfe, 0x03, 0x07, 0x36,
+		    0x07, 0x07, 0x37, 0x0e,	0x8f, 0x73, 0x0c, 0xfc,
+		    0x63, 0x08, 0xf0, 0x60, 0x08, 0x00, 0x60, 0x08,
+		    0x03, 0x60, 0x0c, 0x07, 0x30, 0x0e, 0x1f, 0xb0,
+		    0x07, 0x3f, 0xfc, 0x01 };
+	    }
+	
+	tktray::icon .tray -image ::img::bitmap::tray_icon
+	
+	bind .tray <Button-1> toggle_state
+	bind .tray <Button-3> {shutdownInteractive true}
+    }
+    
+    ### Tray icon animation
+    proc reset_tray {} {
+	global config
+	
+	::img::bitmap::tray_icon configure -foreground white
+	set config(tray,warn,active) {}
+    }
+    
 }
 
 set config(onedrive,changelog,strings) {
@@ -271,7 +318,8 @@ proc new_drive drive {
     set config($drive,logfd) $l
     set config($drive,PID) [pid $f]
     set config($drive,uploading) false
-
+    set config($drive,xterm) 0; # pid of xterm process
+    
     if {$config(X)} {
 	set config($drive,tab) [new_drive_tab $drive]
     }
@@ -285,25 +333,29 @@ proc new_drive drive {
 proc show_log drive {
     global config
 
-    if {![info exists config(log,term)]} {
-	log warning, could not find xterm executable,\
+    if {![llength config(log,xterm)]} {
+	log warning, no valid xterm executable,\
 	    run 'tail -F $config($drive,logfile)' by yourself.
 	return
     }
 
-    set title "onedrive log: $config($drive,name)"
-    set* cmd [subst $config(log,term)] \
-	tail -F [file normalize $config($drive,logfile)]
-
-    if {[catch {open "| [join $cmd] 2>@1" r+} f]} {
-	log error starting log window, giving up: $f 
+    if {$config($drive,xterm)
+	&& ![catch {exec kill -0 $config($drive,xterm)}]
+    } {
+	# Note: xfce4-terminal "changes" pid, so this does not work
+	#  better use xterm
+	log show log for $config($drive,name):$config($drive,xterm): already running
+	$config($drive,tab).tools.show_log configure -text "Running"
 	return
     }
     
-    log show log for $config($drive,name): [join $cmd]
+    set title "onedrive log: $config($drive,name)"
+    set* cmd {*}[subst -nocommands $config(log,xterm)] \
+	tail -F [file normalize $config($drive,logfile)]
 
-    fconfigure $f -blocking false
-    fileevent $f readable [list logpipeto $f $::config(odmon,logWidget)$f]
+    set config($drive,xterm) [exec {*}$cmd 2>@1 &]
+    
+    log show log for $config($drive,name):$config($drive,xterm): [join $cmd]
 }
 
 proc new_drive_tab drive {
@@ -326,6 +378,8 @@ proc new_drive_tab drive {
     pack [button $w.show_log -text "Show Log" \
 	      -command [list show_log $drive]] \
 	-side left
+    
+    return .tabs.$drive
 }
 
 proc unconfig drive {
@@ -466,54 +520,9 @@ proc screen {} {
 
 ### Main
 
-if $config(tray) {
-
-    image create bitmap ::img::bitmap::tray_icon \
-	-foreground white -background DodgerBlue3 \
-	-data {
-	    #define tray_icon_20x20_1_width 20
-	    #define tray_icon_20x20_1_height 20
-	    static unsigned char tray_icon_20x20_1_bits[] = {
-		0x03, 0x30, 0x0e, 0xf1, 0x78, 0x0f, 0xfc, 0xdb,
-		0x0d, 0xfe, 0x9b, 0x0d,	0x0e, 0x9f, 0x0d, 0x07,
-		0x9e, 0x0d, 0x03, 0x1c, 0x00, 0x03, 0x0c, 0x00,
-		0x03, 0xec, 0x00, 0x03, 0xfe, 0x03, 0x07, 0x36,
-		0x07, 0x07, 0x37, 0x0e,	0x8f, 0x73, 0x0c, 0xfc,
-		0x63, 0x08, 0xf0, 0x60, 0x08, 0x00, 0x60, 0x08,
-		0x03, 0x60, 0x0c, 0x07, 0x30, 0x0e, 0x1f, 0xb0,
-		0x07, 0x3f, 0xfc, 0x01 };
-	}
-
-    tktray::icon .tray -image ::img::bitmap::tray_icon
-
-    proc toggle_state {} {
-	
-	switch -- [wm state .] {
-	    normal {
-		wm state . withdrawn
-		set config(window,state) withdrawn
-	    }
-	    withdrawn - iconic {
-		wm state . normal
-		set config(window,state) normal
-	    }
-	    default {
-		log Error: invalid window state reported: [wm state .]
-	    }
-	}
-    }
-    bind .tray <Button-1> toggle_state
-    bind .tray <Button-3> {shutdownInteractive true}
-}
-
 if {$config(X)} {
-    package require Tk
     screen
-} else {
-    proc log args {
-	puts stderr [join $args]
-	
-    }
+    if {$config(tray)} tray
 }
 
 # personal drive
@@ -550,10 +559,18 @@ proc readIniFile {} {
 	return
     }
     iniParse $ini odmConfig
+    
     foreach line $odmConfig(error) {
 	log config file invalid line:$line
     }
-
+    # process global configuration
+    foreach key {xterm tray,warn,timeout window,state} {
+	if {[info exists odmConfig($key)]} {
+	    set config($key) $odmConfig($key)
+	}
+    }
+    
+    # process sections
     if {![llength $odmConfig(sections)]} {
 	log config file info: no drive configured
 	return
@@ -571,6 +588,7 @@ proc readIniFile {} {
 	    log config file error: overriding confdir not allowed: $section
 	}
 	if {!$present} {
+	    set drive [z-base-32-encode $section]
 	    if {![info exists odmConfig($section,confdir)]} {
 		log config file error: drive not set up, no confdir for $section
 		continue
@@ -587,7 +605,7 @@ proc readIniFile {} {
 	    set config($drive,enabled) true
 	    set config($drive,skip) false
 
-	    lappend config(drives) $section
+	    lappend config(drives) $drive
 	}
 	foreach key {enabled logfile name skip} {
 	    if {[info exists odmConfig($section,$key)]} {
@@ -603,25 +621,47 @@ proc readIniFile {} {
 
 readIniFile
 
-# find xterminal emulator
-foreach term $config(log,xterms) {
-    set exe [lindex $term 0]
-    if {[catch {exec which $exe}]} continue
-
-    set config(log,term) $term
-    break
-}
-
 foreach drive $config(drives) {
     if {$config($drive,skip)} {
 	log skipping $config($drive,name)
 	unconfig $drive
 	continue
     }
-    
     after idle new_drive $drive
 }
 
-if {![info exists ::env(DISPLAY)]} {
+if {$config(X)} {
+    proc foundExe cmdline {
+	expr {![catch {exec which [lindex $cmdline 0]}]}
+    }
+    proc findXterm {} {
+	global config
+	
+	if {[info exists config(xterm)]
+	    && [foundExe $config(xterm)]} {
+	    set config(log,xterm) $config(xterm)
+	    return
+	}	
+	foreach term $config(log,xterms) {
+	    if {[foundExe $term]} {
+		set config(log,xterm) $term
+		break
+	    }
+	}
+	if {![llength $config(log,xterm)]} {
+	    log error terminal: none found
+	}
+    }
+    findXterm
+
+    # in case we have set it to normal in the config file
+    if {$config(tray)} {wm state . $config(window,state)}
+} else {
+    log odmon started
     vwait forever
 }
+
+# Emacs
+# Local Variables:
+# mode: tcl
+# End:
