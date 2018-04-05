@@ -9,7 +9,10 @@ set version 0.1.2
 package require Tk
 package require http
 package require tls
-			  
+
+lappend auto_path [file join [pwd] ton]
+set config(use_json2dict) [catch {package require ton}]
+
 set commandline ""
 
 set config(window,state) normal
@@ -410,15 +413,35 @@ every 30000 [list logMemInfo [pid]]
 # http
 http::register https 443 [list ::tls::socket]
 
-# https://wiki.tcl.tk/13419
-proc json2dict JSONtext {
-string range [
-    string trim [
-        string trimleft [
-            string map {\t {} \n {} \r {} , { } : { } \[ \{ \] \}} $JSONtext
-            ] {\uFEFF}
-        ]
-    ] 1 end-1
+if {$config(use_json2dict)} {
+    # https://wiki.tcl.tk/13419
+    proc json2dict JSONtext {
+	string range [
+		      string trim [
+				   string trimleft [
+						    string map {\t {} \n {} \r {} , { } : { } \[ \{ \] \}} $JSONtext
+						   ] {\uFEFF}
+				  ]
+		     ] 1 end-1
+    }
+} else {
+    # ton
+    proc json2dict json {
+	set maxlen 70
+	if {[catch  {::ton::json2ton $json} ton]} {
+	    log error: json2dict $ton: $json
+	    return
+	}
+	set d [namespace eval ton::a2dict $ton]
+	dict for {key value} $d {
+	    if {[string length $value]>$maxlen} {
+		set value [string range $value 0 $maxlen]..
+	    }
+	    log json2dict: ${key}: $value
+	}
+	return $d
+    }
+    
 }
 
 # http://wiki.tcl.tk/14144

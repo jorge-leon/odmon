@@ -30,7 +30,8 @@ activity and can be used to hide/unhide the main window.
 ## How to install
 
 *odmon* is a single Tcl script, just copy it to your disk and run it.
-The same is valie for *odopen*
+The same is valid for *odopen*
+
 
 Requisites:
 
@@ -150,7 +151,28 @@ Since you read the license, I do not need to over stress that it is
 your fault if you loose data or anything consequential by using
 *odmon*.
 
-Some important things ToDo:
+
+## What is the status of odopen
+
+We used the `json2dict` oneliner from the Tcler's wiki to parse out
+the driveID.  `json2dict` destroys URLs and is therefore not suited
+for further development.
+
+In order to continue `odopen.tcl` development we have "selected" the
+*ton* JSON parser.  Currently you have to install it by hand, if you
+want to use it:
+
+- Download *ton* from the
+  [repository](http://at.magma-soft.at/cgi-bin/darcsweb.cgi?r=ton;a=summary)
+
+- Copy or symlink the `ton` directory as a subdirectory of the one
+  where you are running `odmon.tcl`
+
+If you want to know how and why *ton* see this
+[post](http://at.magma-soft.at/sw/blog/posts/Reverse_JSON_parsing_with_TCL/).
+
+
+## ToDo
 
 * Make robust, if not production ready.
 * Add ability to process any `odopen://` URL we can get our hands on.
