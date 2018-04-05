@@ -4,7 +4,7 @@
 # (c) 2018 Georg Lehner <jorge-odmon@at.anteris.net>
 # Share and use it as you like, but don't blame me-
 
-set version 0.1.1
+set version 0.1.2
 
 package require Tk
 package require http
@@ -34,30 +34,6 @@ foreach {label url} {
 set dock_photo_data "R0lGODdhFAAUAKECABh0zR13zv///////ywAAAAAFAAUAAACQZSAqRZolt5xD0gqod42V9iFVXSJ
 5TJuoIKxlPvCK6uisgeOdl6jx4ojTXQ8D2nhmxwjMNdM1wSenEqccvfJJHUFADs="
 
-
-set config(tray,balloon,timeout) 300; # milliseconds
-set config(tray) [expr {![catch {package require tktray}]}]
-set config(tray,warn,timeout) 1000; # milliseconds
-set config(tray,warn,active) {}
-set config(tray,uploading) 0
-
-if $config(tray) {
-
-    image create bitmap ::img::bitmap::dock_icon \
-	-foreground white -background DodgerBlue3 \
-	-data {
-#define dock_icon_20x20_1_width 20
-#define dock_icon_20x20_1_height 20
-static unsigned char dock_icon_20x20_1_bits[] = {
-   0x03, 0x30, 0x0e, 0xf1, 0x78, 0x0f, 0xfc, 0xdb, 0x0d, 0xfe, 0x9b, 0x0d,
-   0x0e, 0x9f, 0x0d, 0x07, 0x9e, 0x0d, 0x03, 0x1c, 0x00, 0x03, 0x0c, 0x00,
-   0x03, 0xec, 0x00, 0x03, 0xfe, 0x03, 0x07, 0x36, 0x07, 0x07, 0x37, 0x0e,
-   0x8f, 0x73, 0x0c, 0xfc, 0x63, 0x08, 0xf0, 0x60, 0x08, 0x00, 0x60, 0x08,
-   0x03, 0x60, 0x0c, 0x07, 0x30, 0x0e, 0x1f, 0xb0, 0x07, 0x3f, 0xfc, 0x01 };
-	}
-
-    tktray::icon .tray -image ::img::bitmap::dock_icon
-}
 
 proc z-base-32-encode str {
 
@@ -131,14 +107,8 @@ proc logpipeto {chan destination {filter {}}} {
     $destination see end
 }
 
-proc log args {logto $::config(odmon,logWidget) {*}$args}
+proc log args {logto $::config(odopen,logWidget) {*}$args}
 
-proc reset_tray {} {
-    global config
-
-    ::img::bitmap::dock_icon configure -foreground white
-    set config(tray,warn,active) {}
-}
 
 set config(onedrive,changelog,strings) {
     {[M] *}
@@ -147,49 +117,6 @@ set config(onedrive,changelog,strings) {
     {Trying to restore the upload session ...}
     {Continuing the upload session ...}
     {Deleting *}
-}
-
-proc notify_changes {drive destination line} {
-    global config
-
-    if {!$config(tray)}  {return $line}
-
-    set found false
-    foreach prefix $config(onedrive,changelog,strings) {
-	if {[string match $prefix $line]} {
-	    set found true
-	    break
-	}
-    }
-    if {!$found} {
-	if {$config($drive,uploading)} {
-	    set config($drive,uploading) false
-	    incr config(tray,uploading) -1
-	}
-	if {$config(tray,uploading)==0} {
-	    reset_tray
-	}
-	return $line
-    }
-
-    if {[llength $config(tray,warn,active)]} {
-	after cancel $config(tray,warn,active)
-	set config(tray,warn,active) {}
-    }
-    if {$prefix eq "Uploading fragment: *"} {
-	::img::bitmap::dock_icon configure -foreground gold
-	if {!$config($drive,uploading)} {
-	    set config($drive,uploading) true
-	    incr config(tray,uploading)
-	}	
-	return $line
-    }
-        
-    ::img::bitmap::dock_icon configure -foreground gold
-    set config(tray,warn,active) \
-	[after $config(tray,warn,timeout) reset_tray]
-    
-    return $line
 }
 
 proc new_drive drive {
@@ -212,7 +139,7 @@ proc new_drive drive {
     logto $logdest $cmd 
     
     fconfigure $f -blocking false
-    fileevent $f readable [list logpipeto $f $logdest "notify_changes $drive"]
+    fileevent $f readable [list logpipeto $f $logdest]
 
     if {[catch {open [file join $config($drive,confdir) refresh_token] r} f]} {
 	log Error no refresh_token file for drive: $drive, $f
@@ -357,10 +284,10 @@ proc screen {} {
     
     # create main window
     wm state . $config(window,state)
-    wm title . odmon
+    wm title . odopen
     wm iconphoto . [image create photo -data $::dock_photo_data]
     
-    # close channels/kill subprocesses when closing odmon
+    # close channels/kill subprocesses when closing odopen
     # https://wiki.tcl.tk/9984
     bindtags . [list . bind. [winfo class .] all]
     bind bind. <Destroy> reap
@@ -390,9 +317,9 @@ proc screen {} {
     # Tabs
     pack [ttk::notebook .tabs] -expand 1 -fill both
 
-    # odmon frame
-    set w [frame .tabs.odmon]
-    .tabs add $w -text odmon
+    # odopen frame
+    set w [frame .tabs.odopen]
+    .tabs add $w -text odopen
 
     # info frame
     pack [set f [frame $w.info]] -fill x
@@ -409,7 +336,7 @@ proc screen {} {
     pack [set f [frame $w.tools]] -fill x
 
     pack [button $f.clear -text Clear \
-	      -command {clear $config(odmon,logWidget)}] \
+	      -command {clear $config(odopen,logWidget)}] \
 	-side left
     
     # log window
@@ -422,7 +349,7 @@ proc screen {} {
 	      -xscrollcommand [list $w.hscroll set]] \
 	-expand 1 -fill both    
 
-    set config(odmon,logWidget) $w.log
+    set config(odopen,logWidget) $w.log
 
     focus .line.commandline
 }
@@ -432,28 +359,6 @@ foreach drive $config(drives) {after idle new_drive $drive}
 
 screen
 
-if $config(tray) {
-
-    proc toggle_state {} {
-	
-	switch -- [wm state .] {
-	    normal {
-		wm state . withdrawn
-		set config(window,state) withdrawn
-	    }
-	    withdrawn - iconic {
-		wm state . normal
-		set config(window,state) normal
-	    }
-	    default {
-		log Error: invalid window state reported: [wm state .]
-	    }
-	}
-    }
-    
-    bind .tray <Button-1> toggle_state
-    
-}
 
 # http://wiki.tcl.tk/9299
 proc every {ms cmd} {
@@ -601,7 +506,7 @@ proc configDrive {sp od} {
 	file mkdir $config($drive,confdir)
 	file copy [file join $config(me,confdir) refresh_token] $config($drive,confdir)
 	set f [open [file join $config($drive,confdir) config] a]
-	puts $f "# odmon [clock format [clock seconds] -format {%+}]
+	puts $f "# odopen [clock format [clock seconds] -format {%+}]
 #
 sync_dir = \"$config($drive,syncdir)\"
 drive_id = \"$config($drive,driveId)\"
