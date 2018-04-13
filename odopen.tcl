@@ -351,7 +351,7 @@ proc configDrive {sp od} {
     set config($drive,confdir) [file join ~ .config onedrive $drive]
     set config($drive,driveId) [dict get $od id]
     
-    set spOrg config(OneDrive,org,displayName)
+    set spOrg $config(OneDrive,org,displayName)
 
     # wrong?: get this from od group owner information?
     set siteName [dict get $sp webTitle]
@@ -387,10 +387,10 @@ drive_id = \"$config($drive,driveId)\"
 
 }
 
-proc logOdopenResult {} {
+proc addDriveFromUrl url {
 
     log Parsing odopen url:
-    set odopen_dict [odopen2dict $::odopen_url]
+    set odopen_dict [odopen2dict $url]
     foreach {key value} $odopen_dict {
 	log ${key}: $value 
     }
@@ -486,7 +486,8 @@ proc screen {} {
     
     # drive_id extractor frame
     pack [set w [frame .odopen]] -fill x
-    pack [button $w.parse -text "odopen?" -command logOdopenResult] -side left
+    pack [button $w.parse -text "odopen?" \
+	      -command {addDriveFromUrl $odopen_url}] -side left
     pack [entry $w.url -relief sunken -bd 2 -textvariable odopen_url -width 60] \
 	-side left -expand 1 -fill x
 
@@ -575,16 +576,31 @@ proc getOrgData {} {
     }
     set config(OneDrive,org,displayName) $org
 }
-
+#
+# commandline processing
+#
+proc options opts {
+    global config
+    if {[llength $opts]>1} {
+	log Error: invalid commandline: $opts
+	return
+    }
+    if {[llength $opts]==1} {
+	set config(opts,url) [lindex $opts 0]
+    }
+}
 
 #
 # main
 #
-proc main {} {
+proc main opts {
     global config
 
     screen
 
+    options $opts
+    
+    
     if {[catch {slurp [file join $config(confdir) odopen_token]} token]} {
 	log Error no odopen_token file: $token.
 	log Info: you need to 'Authorize' before you can do anything else.
@@ -594,9 +610,12 @@ proc main {} {
 	getUserData
 	getOrgData
     }
+    if {[info exists config(opts,url)]} {
+	addDriveFromUrl $config(opts,url)
+    }
 }
 
-main
+main $argv
 
 # Emacs:
 # Local Variables:
