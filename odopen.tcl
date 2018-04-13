@@ -21,6 +21,7 @@ set commandline ""
 set config(confdir) [file join ~ .config onedrive]
 
 set config(clientId) "22c49a0d-d21c-4792-aed1-8f163c982546"
+set config(OneDrive,scope) "user.read files.readwrite files.readwrite.all offline_access"
 
 set config(access_timeout) 0
 
@@ -120,8 +121,9 @@ proc graph::requestAuthorization {} {
     variable authUrl
     variable redirectUrl
     log trying to launch browser with the following url:
-    set url \
-	$authUrl?client_id=$config(clientId)&scope=user.read&response_type=code&redirect_uri=$redirectUrl
+    set url $authUrl?client_id=$config(clientId)&
+    append url scope=$config(OneDrive,scope)&response_type=code&
+    append url redirect_uri=$redirectUrl
     log $url
     log Copy the resulting URL from the Browser to the 'Authorize' text entry and press the button again.
     if {[catch {exec x-www-browser $url} err]} {
