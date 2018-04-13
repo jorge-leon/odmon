@@ -9,6 +9,7 @@ set version 0.1.2
 package require Tk
 package require http
 package require tls
+http::register https 443 [list ::tls::socket]
 
 lappend auto_path [file join [pwd] ton]
 set config(use_json2dict) [catch {package require ton}]
@@ -20,6 +21,7 @@ set config(window,state) normal
 set config(clientId) "22c49a0d-d21c-4792-aed1-8f163c982546"
 
 set config(me,access_timeout) 0
+
 
 foreach {label url} {
     authUrl https://login.microsoftonline.com/common/oauth2/v2.0/authorize
@@ -37,6 +39,11 @@ foreach {label url} {
 set dock_photo_data "R0lGODdhFAAUAKECABh0zR13zv///////ywAAAAAFAAUAAACQZSAqRZolt5xD0gqod42V9iFVXSJ
 5TJuoIKxlPvCK6uisgeOdl6jx4ojTXQ8D2nhmxwjMNdM1wSenEqccvfJJHUFADs="
 
+# Libraries
+
+#
+# z-base-32
+#
 
 proc z-base-32-encode str {
 
@@ -70,24 +77,205 @@ proc z-base-32-check str {
     } $str] eq ""}
 }
 
-set config(drives) me
-set config(me,name) OneDrive
-set config(me,confdir) [file join ~ .config onedrive]
-# find drive directories
-foreach drive [glob -nocomplain \
-	       -types d -tails -dir [file join ~ .config onedrive] *] {
-    if {[z-base-32-check $drive]} {
-	lappend config(drives) $drive
-	set config($drive,confdir) [file join ~ .config onedrive $drive]
-	set config($drive,name) [string trimright [z-base-32-decode $drive] \0]
+#
+# JSON
+#
+if {$config(use_json2dict)} {
+    # https://wiki.tcl.tk/13419
+    proc json2dict JSONtext {
+	string range \
+	    [string trim \
+		 [string trimleft \
+		      [string map {\t {} \n {} \r {} , { } : { } \[ \{ \] \}} $JSONtext
+		      ] {\uFEFF}
+		 ]
+	    ] 1 end-1
+    }
+} else {
+    # ton
+    proc json2dict json {
+	set maxlen 70
+	if {[catch  {::ton::json2ton $json} ton]} {
+	    log error: json2dict $ton: $json
+	    return
+	}
+	set d [namespace eval ton::a2dict $ton]
+	dict for {key value} $d {
+	    if {[string length $value]>$maxlen} {
+		set value [string range $value 0 $maxlen]..
+	    }
+	    log json2dict: ${key}: $value
+	}
+	return $d
+    }
+    
+}
+#
+# REST
+#
+# http://wiki.tcl.tk/21624, added Authorization header and token
+# refresh mechanism for Microsoft Graph API
+#
+namespace eval graph {
+    variable graphApi https://graph.microsoft.com/v1.0
+    variable redirectUrl \
+	https://login.microsoftonline.com/common/oauth2/nativeclient
+    variable tokenUrl \
+	https://login.microsoftonline.com/common/oauth2/v2.0/token
+    variable authUrl \
+	https://login.microsoftonline.com/common/oauth2/v2.0/authorize
+
+    namespace export GET
+}
+proc graph::Authorize url {
+    global config
+    variable redirectUrl
+    variable authUrl
+    variable tokenUrl
+
+    log open the following URL
+    log \
+	$authUrl?client_id=$config(clientId)&scope=user.read&response_type=code&redirect_uri=$redirectUrl
+    log the resulting URL in the browser contains a 'code' parameter
+
+    set query [lindex [split $url ?] 1]
+    set code ""
+    foreach p [split $query &] {
+	lassign [split $p =] k v
+	if {$k eq "code"} {
+	    set code $v
+	    break
+	}
+    }
+    if {![string length $code]} {
+	log Error: no authentication code find in response url.
+	return
+    }    
+    set query [http::formatQuery \
+		   client_id $config(clientId) \
+		   redirect_uri $redirectUrl \
+		   code $code \
+		   grant_type authorization_code
+	      ]
+    set token [http::geturl $tokenUrl -query $query]
+    set result [http::data $token]
+    http::cleanup $token
+    set result [json2dict $result]
+    set config(me,access_token) [dict get $result access_token]
+    set expiry [dict get $result expires_in]
+    set config(me,access_timeout) [expr {[clock seconds] + $expiry}]
+    log (re)writing refresh_token
+    if {[catch {open \
+		    [file join ~ .config onedrive odopen_token] \
+		    w} \
+	     f]} {
+	log Error: could not create/truncate odopen_token file: $f
+    } else {
+	puts -nonewline $f [dict get $result refresh_token]
+	close $f
     }
 }
+proc graph::RefreshToken {} {
+    global config
+    variable redirectUrl
+    variable tokenUrl
+    
+    set query [http::formatQuery \
+		   client_id $config(clientId) \
+		   redirect_uri $redirectUrl \
+		   refresh_token $config(me,token)\
+		   grant_type refresh_token
+		  ]
+    set token [http::geturl $tokenUrl -query $query]
+    set result [http::data $token]
+    http::cleanup $token
+    set result [json2dict $result]
+    set config(me,access_token) [dict get $result access_token]
+    set expiry [dict get $result expires_in]
+    set config(me,access_timeout) [expr {[clock seconds] + $expiry}]
+    return $result
+}
+proc graph::ExtractError tok {return [http::code $tok],[http::data $tok]}
+proc graph::OnRedirect {tok location} {
+    variable graphApi
+    upvar 1 url url
+    set url $location
+    set where $location
+    if {[string equal -length [string length $graphApi/] $location $graphApi/]} {
+	set where [string range $where [string length $graphApi/] end]
+	return -level 2 [split $where /]
+    }
+    return -level 2 $where
+}
+proc graph::DoRequest {method url {type ""} {value ""}} {
+    global config
+    for {set reqs 0} {$reqs < 5} {incr reqs} {
+	if {[info exists tok]} {
+	    http::cleanup $tok
+	}
+	if {[clock seconds] >= $config(me,access_timeout)} RefreshToken
+	set headers [list Authorization "Bearer $config(me,access_token)"]
+	foreach v {method url headers method type value} {
+	    log $v: [set $v]
+	}
+	set tok [http::geturl $url \
+		     -headers $headers -method $method \
+		     -type $type -query $value]
+	if {[http::ncode $tok] > 399} {
+	    set msg [ExtractError $tok]
+	    http::cleanup $tok
+	    return -code error $msg
+	} elseif {[http::ncode $tok] > 299 || [http::ncode $tok] == 201} {
+	    set location {}
+	    if {[catch {
+		set location [dict get [http::meta $tok] Location]
+	    }]} {
+		http::cleanup $tok
+		error "missing a location header!"
+	    }
+	    OnRedirect $tok $location
+	} else {
+	    set s [http::data $tok]
+	    http::cleanup $tok
+	    return $s
+	}
+    }
+    error "too many redirections!"
+}
+proc graph::GET args {
+    variable graphApi
+    DoRequest GET $graphApi/[join $args /]
+}
+proc graph::POST {args} {
+    variable graphApi
+    set type [lindex $args end-1]
+    set value [lindex $args end]
+    set m POST
+    set path [join [lrange $args 0 end-2] /]
+    DoRequest $m $graphApi/$path $type $value
+}
+# proc graph::PUT {args} {
+#     variable graphApi
+#     set type [lindex $args end-1]
+#     set value [lindex $args end]
+#     set m PUT
+#     set path [join [lrange $args 0 end-2] /]
+#     DoRequest $m $graphApi/$path $type $value
+# }
+# proc graph::DELETE args {
+#     variable graphApi
+#     set m DELETE
+#     DoRequest $m $graphApi/[join $args /]
+# }
 
+#
+# Scan for drive configuration directories
+#
 
-# Tcl
-proc set* {var args} {uplevel set $var [list $args]}
+set config(me,confdir) [file join ~ .config onedrive]
 
-###proc clear textWidget {$textWidget delete 0.0 end}
+# GUI
+
 proc clear logWidget {$logWidget delete 0 end}
 
 proc logto {destination args} {
@@ -112,149 +300,11 @@ proc logpipeto {chan destination {filter {}}} {
 
 proc log args {logto $::config(odopen,logWidget) {*}$args}
 
-
-set config(onedrive,changelog,strings) {
-    {[M] *}
-    {Uploading file *}
-    {Uploading fragment: *}
-    {Trying to restore the upload session ...}
-    {Continuing the upload session ...}
-    {Deleting *}
-}
-
-proc new_drive drive {
-    global config
-    
-    log new_drive $drive
-
-    set* cmd onedrive --confdir $config($drive,confdir) -m -v
-    if {[catch {open "| [join $cmd] 2>@1" r+} f]} {
-	log error " " $f 
-	return
-    }
-    set config($drive,chan) $f
-    set config($drive,PID) [pid $f]
-    set config($drive,uploading) false
-
-    set logdest [new_drive_tab $drive]
-
-
-    logto $logdest $cmd 
-    
-    fconfigure $f -blocking false
-    fileevent $f readable [list logpipeto $f $logdest]
-
-    if {[catch {open [file join $config($drive,confdir) refresh_token] r} f]} {
-	log Error no refresh_token file for drive: $drive, $f
-	close $config($drive,chan)
-	remove_drive $drive
-	return
-    }
-    set config($drive,token) [read $f]
-    close $f
-
-    log token for $drive: $config($drive,token) 
-
-    # monitor memory info
-    #every 3000 [list logMemInfo $config($drive,PID)]
-    
-    lappend config(drives) $drive
-}
-
-proc url_prefix_helper {arrName index op} {
-    lassign [array get $arrName $index] dummy key
-    lassign [split $index ,] drive url_prefix_key
-    array set $arrName [list $drive,url_prefix $::config(OneDrive,url,$key)]
-}
-
-proc new_drive_tab drive {
-    global config
-
-    frame .tabs.$drive
-    .tabs add .tabs.$drive -text $config($drive,name)
-
-    # info frame
-    pack [set w [frame .tabs.$drive.info]] -fill x
-
-    #   pid
-    pack [label $w.pid_label -text pid:] -side left
-    pack [label $w.pid  -width 7 -textvariable ::config($drive,PID)] -side left
-
-    #   token
-    pack [label $w.token_label -text token:] -side left
-
-    pack [label $w.token -textvariable ::config($drive,token) -width 40] \
-	-side left -fill x -expand 1
-    
-    # tools frame
-    pack [set w [frame .tabs.$drive.tools]] -fill x
-
-    # forward reference    
-    pack [button $w.clear -text Clear \
-	      -command [list clear .tabs.$drive.log.text]] \
-	-side left
-    
-    # geturl frame
-    pack [set w [frame .tabs.$drive.geturl]] -fill x
-
-    set tags {}
-    foreach key [array names ::config OneDrive,url,*] {
-	lappend tags [string range $key [string length OneDrive,url,] end]
-    }
-    
-    tk_optionMenu $w.url_prefix_key ::config($drive,url_prefix_key) {*}$tags]
-
-    pack [label $w.url_prefix_url -textvariable ::config($drive,url_prefix)] -side left
-
-    trace add variable ::config($drive,url_prefix_key) write url_prefix_helper
-        
-    # log frame
-    pack [set w [frame .tabs.$drive.log]] -expand 1 -fill both
-    
-    pack [scrollbar $w.hscroll -command [list $w.text xview] \
-	      -orient horizontal] \
-	-side bottom -fill x
-    pack [scrollbar $w.vscroll -command [list $w.text yview]] \
-	-side right -fill y
-    pack [listbox $w.text -relief sunken -bd 2 \
-	      -yscrollcommand [list $w.vscroll set] \
-	      -xscrollcommand [list $w.hscroll set]] \
-	-expand 1 -fill both
-    
-    set config($drive,logWidget) .tabs.$drive.log.text
-}
-
-proc remove_drive drive {
-    global config
-    
-    log remove_drive $drive
-    foreach name [array names config $drive,*] {
-	unset config($name)
-    }
-    # remove drive from drive list
-    # http://wiki.tcl.tk/15659
-    set config(drives) [lsearch -all -inline -not -exact $config(drives) $drive]
-
-    destroy .tabs.$drive
-}
-
-proc add_button {name label command} {
-    button .top.$name -text $label -command $command
-    pack .top.$name -side left -padx 0p -pady 0 -anchor n
-}
-
 proc repl {} {
     log % $::commandline
     catch {uplevel #0 $::commandline} result
     log $result
     set ::commandline ""
-}
-	  
-proc reap {} {
-    foreach chan [chan names file*] {
-	close $chan
-	puts stderr "$chan closed"
-    }
 }
 
 proc screen {} {
@@ -293,7 +343,6 @@ proc screen {} {
     # close channels/kill subprocesses when closing odopen
     # https://wiki.tcl.tk/9984
     bindtags . [list . bind. [winfo class .] all]
-    bind bind. <Destroy> reap
 
     # top frame
     pack [set w [frame .top -borderwidth 10]] -fill x
@@ -357,91 +406,23 @@ proc screen {} {
     focus .line.commandline
 }
 
-
-foreach drive $config(drives) {after idle new_drive $drive}
-
 screen
 
-
-# http://wiki.tcl.tk/9299
-proc every {ms cmd} {
-    {*}$cmd
-    after $ms [list after idle [info level 0]]
-}
-
-proc logMemInfo pid {
-    global config
-    
-    set* cmd pmap -q $pid
-    if {[catch {open "| [join $cmd] 2>@1" r} f]} {
-	log Error: running pmap $pid: $f 
-	return
-    }
-    if {[gets $f line]==-1} {
-	log Error: getting first line of pmap $pid
-	close $f
-	return
-    }
-    set config(pmap,$pid,commandline) $line
-    set config(pmap,$pid,mem) 0
-    log pmap: checking $line 
-    while {[gets $f line]!=-1} {
-	set line [string map {\[ "" \] ""} $line]
-	lassign $line addr mem rw process
-	set mem [string range $mem 0 end-1]; # strip trailing K
-	incr config(pmap,$pid,mem) $mem
-	if {[info exists config(pmap,$pid,$addr,mem)]} {
-	    if {$mem != $config(pmap,$pid,$addr,mem)} {
-		log $line 
-		log pmap: $pid $config(pmap,$pid,$addr,process): \
-		    $config(pmap,$pid,$addr,mem) -> $mem 
-		set config(pmap,$pid,$addr,mem) $mem
-	    }
-	} else {
-	    foreach item {mem rw process} {
-		set config(pmap,$pid,$addr,$item) [set $item]
-	    }
-	}
-    }
-    close $f    
-}
-
-# To track own memory usage log memory consumption with pmap [pid] regularily
-every 30000 [list logMemInfo [pid]]
-
-
-# http
-http::register https 443 [list ::tls::socket]
-
-if {$config(use_json2dict)} {
-    # https://wiki.tcl.tk/13419
-    proc json2dict JSONtext {
-	string range [
-		      string trim [
-				   string trimleft [
-						    string map {\t {} \n {} \r {} , { } : { } \[ \{ \] \}} $JSONtext
-						   ] {\uFEFF}
-				  ]
-		     ] 1 end-1
-    }
+# get refresh token
+if {[catch {open [file join $config(me,confdir) refresh_token] r} f]} {
+    log Error no refresh_token file for personal drive: $f
 } else {
-    # ton
-    proc json2dict json {
-	set maxlen 70
-	if {[catch  {::ton::json2ton $json} ton]} {
-	    log error: json2dict $ton: $json
-	    return
-	}
-	set d [namespace eval ton::a2dict $ton]
-	dict for {key value} $d {
-	    if {[string length $value]>$maxlen} {
-		set value [string range $value 0 $maxlen]..
-	    }
-	    log json2dict: ${key}: $value
-	}
-	return $d
-    }
-    
+    set config(me,token) [read $f]
+    close $f
+    log token for personal drive: $config(me,token) 
+}
+# get odopen refresh token
+if {[catch {open [file join $config(me,confdir) odopen_token] r} f]} {
+    log Error no odopen_token file: $f
+} else {
+    set config(OneDrive,refresh_token) [read $f]
+    close $f
+    log authCode: $config(OneDrive,refresh_token) 
 }
 
 # http://wiki.tcl.tk/14144
@@ -471,18 +452,16 @@ proc odopen2dict url {
 proc getDriveData odopen {
     global config
 
-    set url $config(OneDrive,url,siteUrl)
     set host [lindex [split [dict get $odopen webUrl] /] 2]
-    append url $host ,
-    # get rid of {}
     set siteId [string range [dict get $odopen siteId] 1 end-1]
-    append url $siteId ,
     set webId [string range [dict get $odopen webId] 1 end-1]
-    append url $webId /lists/
-    set listId [string range [dict get $odopen listId] 1 end-1]
-    append url $listId /drive
 
-    getMSApi $url
+    set listId [string range [dict get $odopen listId] 1 end-1]
+
+    graph::GET \
+	sites [join [list $host $siteId $webId] ,] \
+	lists $listId \
+	drive
 }
 
 proc configDrive {sp od} {
@@ -560,48 +539,11 @@ proc logOdopenResult {} {
     
 }
 
-proc getMSApi url {
-    global config
 
-    if {[clock seconds] >= $config(me,access_timeout)} {
-	access
-    }
-    set headers [list Authorization "Bearer $config(me,access_token)"]
+# helper for commandline
+namespace import graph::*
 
-    set token [http::geturl $url -headers $headers]
-    set result [http::data $token]
-    http::cleanup $token
-    dict for {key value} [json2dict $result] {
-	log ${key}: $value 
-    }
-    return $result
-    
-}
-
-proc get {{url_postfix {}}} {
-    
-    set url $config(me,url_prefix)
-    append url $url_postfix
-
-    getMSApi $url
-}
-
-
-proc access {} {
-    global config
-    
-    set query [http::formatQuery \
-		   client_id $config(clientId) \
-		   redirect_uri $config(OneDrive,url,redirectUrl) \
-		   refresh_token $config(me,token)\
-		   grant_type refresh_token
-		  ]
-    set token [http::geturl $config(OneDrive,url,tokenUrl) -query $query]
-    set result [http::data $token]
-    http::cleanup $token
-    set result_data [json2dict $result]
-    set config(me,access_token) [dict get $result_data access_token]
-    set expiry [dict get $result_data expires_in]
-    set config(me,access_timeout) [expr {[clock seconds] + $expiry}]
-    return [json2dict $result]
+proc get args {
+    json2dict [graph::GET {*}$args]    
+    return
 }
