@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=odmon - odopen
+Comment=Add OneDrives from SharePoint to onedrive/odmon
+Exec=/usr/local/bin/odopen.tcl %u
+Icon=/usr/local/share/odmon/dock_icon.gif
+Path=
+Terminal=false
+StartupNotify=false
+Categories=Utility;
+MimeType=x-scheme-handler/odopen;
