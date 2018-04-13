@@ -1,10 +1,12 @@
-#!/usr/bin/wish
+#!/bin/sh
+# the next line restarts using tclsh \
+    exec tclsh "$0" ${1+"$@"}
 
 # leg20180315
 # (c) 2018 Georg Lehner <jorge-odmon@at.anteris.net>
 # Share and use it as you like, but don't blame me-
 
-set version 0.1.2
+set version 0.2
 
 package require Tk
 package require http
@@ -16,37 +18,26 @@ set config(use_json2dict) [catch {package require ton}]
 
 set commandline ""
 
-set config(window,state) normal
+set config(confdir) [file join ~ .config onedrive]
 
 set config(clientId) "22c49a0d-d21c-4792-aed1-8f163c982546"
 
-set config(me,access_timeout) 0
-
-
-foreach {label url} {
-    authUrl https://login.microsoftonline.com/common/oauth2/v2.0/authorize
-    redirectUrl https://login.microsoftonline.com/common/oauth2/nativeclient
-    tokenUrl https://login.microsoftonline.com/common/oauth2/v2.0/token
-    itemByIdUrl https://graph.microsoft.com/v1.0/me/drive/items/
-    itemByPathUrl https://graph.microsoft.com/v1.0/me/drive/root:/
-    driveByIdUrl https://graph.microsoft.com/v1.0/drives/
-    driveUrl https://graph.microsoft.com/v1.0/me/drive
-    siteUrl https://graph.microsoft.com/v1.0/sites/
-} {
-    set config(OneDrive,url,$label) $url
-}
+set config(access_timeout) 0
 
 set dock_photo_data "R0lGODdhFAAUAKECABh0zR13zv///////ywAAAAAFAAUAAACQZSAqRZolt5xD0gqod42V9iFVXSJ
 5TJuoIKxlPvCK6uisgeOdl6jx4ojTXQ8D2nhmxwjMNdM1wSenEqccvfJJHUFADs="
 
 # Libraries
 
+proc slurp f {set f [read [set f [open $f]]][close $f]}
+proc spit {f data} {
+    puts -nonewline [set f [open $f w]] $data
+    close $f
+}
 #
 # z-base-32
 #
-
 proc z-base-32-encode str {
-
     binary scan $str b* bits
     if {[set rest [expr {[string length $bits]%5}]]} {
 	append bits [string repeat 0 [expr {5-$rest}]]
@@ -58,7 +49,6 @@ proc z-base-32-encode str {
         11000 a 11001 3 11010 4 11011 5 11100 h 11101 7 11110 6 11111 9
     } $bits
 }
-
 proc z-base-32-decode str {
     binary format b* [string map {
         y 00000 b 00001 n 00010 d 00011 r 00100 f 00101 g 00110 8 00111
@@ -67,7 +57,6 @@ proc z-base-32-decode str {
         a 11000 3 11001 4 11010 5 11011 h 11100 7 11101 6 11110 9 11111
     } $str]
 }
-
 proc z-base-32-check str {
     expr {[string map {
         y {} b {} n {} d {} r {} f {} g {} 8 {}
@@ -76,7 +65,6 @@ proc z-base-32-check str {
         a {} 3 {} 4 {} 5 {} h {} 7 {} 6 {} 9 {}
     } $str] eq ""}
 }
-
 #
 # JSON
 #
@@ -127,16 +115,26 @@ namespace eval graph {
 
     namespace export GET
 }
+proc graph::requestAuthorization {} {
+    global config
+    variable authUrl
+    variable redirectUrl
+    log trying to launch browser with the following url:
+    set url \
+	$authUrl?client_id=$config(clientId)&scope=user.read&response_type=code&redirect_uri=$redirectUrl
+    log $url
+    log Copy the resulting URL from the Browser to the 'Authorize' text entry and press the button again.
+    if {[catch {exec x-www-browser $url} err]} {
+	log Error: $err
+    } else {
+	log browser launched.
+    }
+}
 proc graph::Authorize url {
     global config
     variable redirectUrl
-    variable authUrl
     variable tokenUrl
 
-    log open the following URL
-    log \
-	$authUrl?client_id=$config(clientId)&scope=user.read&response_type=code&redirect_uri=$redirectUrl
-    log the resulting URL in the browser contains a 'code' parameter
 
     set query [lindex [split $url ?] 1]
     set code ""
@@ -161,18 +159,15 @@ proc graph::Authorize url {
     set result [http::data $token]
     http::cleanup $token
     set result [json2dict $result]
-    set config(me,access_token) [dict get $result access_token]
+    set config(access_token) [dict get $result access_token]
     set expiry [dict get $result expires_in]
-    set config(me,access_timeout) [expr {[clock seconds] + $expiry}]
+    set config(access_timeout) [expr {[clock seconds] + $expiry}]
     log (re)writing refresh_token
-    if {[catch {open \
+    if {[catch {spit \
 		    [file join ~ .config onedrive odopen_token] \
-		    w} \
-	     f]} {
-	log Error: could not create/truncate odopen_token file: $f
-    } else {
-	puts -nonewline $f [dict get $result refresh_token]
-	close $f
+		    [dict get $result refresh_token]} \
+	     err]} {
+	log Error: could not write odopen_token: $err
     }
 }
 proc graph::RefreshToken {} {
@@ -183,16 +178,16 @@ proc graph::RefreshToken {} {
     set query [http::formatQuery \
 		   client_id $config(clientId) \
 		   redirect_uri $redirectUrl \
-		   refresh_token $config(me,token)\
+		   refresh_token $config(token)\
 		   grant_type refresh_token
 		  ]
     set token [http::geturl $tokenUrl -query $query]
     set result [http::data $token]
     http::cleanup $token
     set result [json2dict $result]
-    set config(me,access_token) [dict get $result access_token]
+    set config(access_token) [dict get $result access_token]
     set expiry [dict get $result expires_in]
-    set config(me,access_timeout) [expr {[clock seconds] + $expiry}]
+    set config(access_timeout) [expr {[clock seconds] + $expiry}]
     return $result
 }
 proc graph::ExtractError tok {return [http::code $tok],[http::data $tok]}
@@ -213,8 +208,8 @@ proc graph::DoRequest {method url {type ""} {value ""}} {
 	if {[info exists tok]} {
 	    http::cleanup $tok
 	}
-	if {[clock seconds] >= $config(me,access_timeout)} RefreshToken
-	set headers [list Authorization "Bearer $config(me,access_token)"]
+	if {[clock seconds] >= $config(access_timeout)} RefreshToken
+	set headers [list Authorization "Bearer $config(access_token)"]
 	foreach v {method url headers method type value} {
 	    log $v: [set $v]
 	}
@@ -267,22 +262,14 @@ proc graph::POST {args} {
 #     set m DELETE
 #     DoRequest $m $graphApi/[join $args /]
 # }
-
 #
-# Scan for drive configuration directories
-#
-
-set config(me,confdir) [file join ~ .config onedrive]
-
 # GUI
-
+#
 proc clear logWidget {$logWidget delete 0 end}
-
 proc logto {destination args} {
     $destination insert end [join $args]
     $destination see end
 }
-
 proc logpipeto {chan destination {filter {}}} {
     # chan .. channel to read
     # destination .. text widget, where to append the log line
@@ -297,133 +284,11 @@ proc logpipeto {chan destination {filter {}}} {
     $destination insert end $line
     $destination see end
 }
-
 proc log args {logto $::config(odopen,logWidget) {*}$args}
 
-proc repl {} {
-    log % $::commandline
-    catch {uplevel #0 $::commandline} result
-    log $result
-    set ::commandline ""
-}
-
-proc screen {} {
-    global config
-    
-    # make labels selectable
-    bind Label <1> {focus %W}
-
-    bind Label <FocusIn> {
-	%W configure -background grey -foreground white
-    }
-    bind Label <Double-Button-1> {
-	%W configure -background grey -foreground white
-	selection clear
-	clipboard clear
-	clipboard append [%W cget -text]
-    }
-    bind Label <Control-c> {
-	selection clear
-	clipboard clear
-	clipboard append [%W cget -text]
-    }
-    bind Label <FocusOut> {
-	%W configure \
-	    -background $config(label,background) \
-	    -foreground $config(label,foreground)
-    }
-
-    bind Entry <2> {%W insert insert [clipboard get]}
-    
-    # create main window
-    wm state . $config(window,state)
-    wm title . odopen
-    wm iconphoto . [image create photo -data $::dock_photo_data]
-    
-    # close channels/kill subprocesses when closing odopen
-    # https://wiki.tcl.tk/9984
-    bindtags . [list . bind. [winfo class .] all]
-
-    # top frame
-    pack [set w [frame .top -borderwidth 10]] -fill x
-
-    # Commandline frame
-    pack [set w [frame .line]] -fill x
-    
-    pack [label $w.label -text Command:] -side left
-    pack [entry $w.commandline -relief sunken -bd 2 -textvariable commandline] \
-	-side left -expand 1 -fill x
-    bind $w.commandline "<Return>" repl
-
-    # intermezzo to get back/foreground color
-    set config(label,background) [$w.label cget -background]
-    set config(label,foreground) [$w.label cget -foreground]
-
-    
-    # drive_id extractor frame
-    pack [set w [frame .odopen]] -fill x
-    pack [button $w.parse -text "odopen?" -command logOdopenResult] -side left
-    pack [entry $w.url -relief sunken -bd 2 -textvariable odopen_url] \
-	-side left -expand 1 -fill x
-
-    # Tabs
-    pack [ttk::notebook .tabs] -expand 1 -fill both
-
-    # odopen frame
-    set w [frame .tabs.odopen]
-    .tabs add $w -text odopen
-
-    # info frame
-    pack [set f [frame $w.info]] -fill x
-
-    #   pid
-    pack [label $f.pid_label -text pid:] -side left
-    pack [label $f.pid  -width 7 -text [pid]] -side left
-
-    #  mem
-    pack [label $f.mem_lebel -text mem:] -side left
-    pack [label $f.mem -width 8 -textvariable config(pmap,[pid],mem)] -side left
-
-    # Tools frame
-    pack [set f [frame $w.tools]] -fill x
-
-    pack [button $f.clear -text Clear \
-	      -command {clear $config(odopen,logWidget)}] \
-	-side left
-    
-    # log window
-    pack [scrollbar $w.hscroll -orient horizontal -command [list $w.log xview]] \
-	-side bottom -fill x
-    pack [scrollbar $w.vscroll -command [list $w.log yview]] \
-	-side right  -fill y
-    pack [listbox $w.log -relief sunken -bd 2 \
-	      -yscrollcommand [list $w.vscroll set] \
-	      -xscrollcommand [list $w.hscroll set]] \
-	-expand 1 -fill both    
-
-    set config(odopen,logWidget) $w.log
-
-    focus .line.commandline
-}
-
-screen
-
-# get refresh token
-if {[catch {open [file join $config(me,confdir) refresh_token] r} f]} {
-    log Error no refresh_token file for personal drive: $f
-} else {
-    set config(me,token) [read $f]
-    close $f
-    log token for personal drive: $config(me,token) 
-}
-# get odopen refresh token
-if {[catch {open [file join $config(me,confdir) odopen_token] r} f]} {
-    log Error no odopen_token file: $f
-} else {
-    set config(OneDrive,refresh_token) [read $f]
-    close $f
-    log authCode: $config(OneDrive,refresh_token) 
-}
+#
+#  GUI - New Drive Configuration
+#
 
 # http://wiki.tcl.tk/14144
 proc url-decode str {
@@ -486,8 +351,7 @@ proc configDrive {sp od} {
     set config($drive,confdir) [file join ~ .config onedrive $drive]
     set config($drive,driveId) [dict get $od id]
     
-    log Warning: pending implementation: get organisation name. setting to UCAN
-    set spOrg UCAN
+    set spOrg config(OneDrive,org,displayName)
 
     # wrong?: get this from od group owner information?
     set siteName [dict get $sp webTitle]
@@ -506,7 +370,7 @@ proc configDrive {sp od} {
 		    -detail $detail]
     if {$answer eq "yes"} {
 	file mkdir $config($drive,confdir)
-	file copy [file join $config(me,confdir) refresh_token] $config($drive,confdir)
+	file copy [file join $config(confdir) refresh_token] $config($drive,confdir)
 	set f [open [file join $config($drive,confdir) config] a]
 	puts $f "# odopen [clock format [clock seconds] -format {%+}]
 #
@@ -514,7 +378,6 @@ sync_dir = \"$config($drive,syncdir)\"
 drive_id = \"$config($drive,driveId)\"
 "
 	close $f
-	new_drive $drive
     } else {
 	# remove from memory so we can check again.
 	foreach key [array names config $drive,*] {
@@ -538,12 +401,204 @@ proc logOdopenResult {} {
     configDrive $odopen_dict [json2dict $drive_data]
     
 }
+#
+# GUI - Authorization procedure
+#
+proc authorize {} {
+    if {[string length $::authorize_url]} {
+	graph::Authorize $::authorize_url
+	set $::authorize_url ""
+	getUserData
+	getOrgData
+    } else {
+	graph::requestAuthorization
+    }
+}
+#
+# GUI - Command interpreter
+#
+proc repl {} {
+    log % $::commandline
+    catch {uplevel #0 $::commandline} result
+    log $result
+    set ::commandline ""
+}
 
-
-# helper for commandline
 namespace import graph::*
 
 proc get args {
     json2dict [graph::GET {*}$args]    
     return
 }
+#
+# GUI - main panel
+#
+proc screen {} {
+    global config
+    
+    # make labels selectable
+    bind Label <1> {focus %W}
+
+    bind Label <FocusIn> {
+	%W configure -background grey -foreground white
+    }
+    bind Label <Double-Button-1> {
+	%W configure -background grey -foreground white
+	selection clear
+	clipboard clear
+	clipboard append [%W cget -text]
+    }
+    bind Label <Control-c> {
+	selection clear
+	clipboard clear
+	clipboard append [%W cget -text]
+    }
+    bind Label <FocusOut> {
+	%W configure \
+	    -background $config(label,background) \
+	    -foreground $config(label,foreground)
+    }
+
+    bind Entry <2> {%W insert insert [clipboard get]}
+    
+    # create main window
+    wm title . odopen
+    wm iconphoto . [image create photo -data $::dock_photo_data]
+    
+    # https://wiki.tcl.tk/9984
+    bindtags . [list . bind. [winfo class .] all]
+
+    # top frame
+    pack [set w [frame .top -borderwidth 10]] -fill x
+
+    # Commandline frame
+    pack [set w [frame .line]] -fill x
+    
+    pack [label $w.label -text Command:] -side left
+    pack [entry $w.commandline -relief sunken -bd 2 -textvariable commandline] \
+	-side left -expand 1 -fill x
+    bind $w.commandline "<Return>" repl
+
+    # intermezzo to get back/foreground color
+    set config(label,background) [$w.label cget -background]
+    set config(label,foreground) [$w.label cget -foreground]
+
+    
+    # drive_id extractor frame
+    pack [set w [frame .odopen]] -fill x
+    pack [button $w.parse -text "odopen?" -command logOdopenResult] -side left
+    pack [entry $w.url -relief sunken -bd 2 -textvariable odopen_url -width 60] \
+	-side left -expand 1 -fill x
+
+    # Authorization helper frame
+    pack [set w [frame .authz]] -fill x
+    pack [button $w.parse -text "Authorize" -command authorize] -side left
+    pack [entry $w.url -relief sunken -bd 2 -textvariable authorize_url -width 60] \
+	-side left -expand 1 -fill x
+
+
+    # Bottom combo
+    pack [set w [frame .bottom]] -fill both -expand 1
+    
+    # info frame
+    pack [set f [frame $w.info]] -fill x
+
+    #   me
+    pack [label $f.me_label -text me:] -side left
+    pack [label $f.me  -width 30 -anchor w \
+	      -textvariable config(OneDrive,me,displayName)] -side left
+
+    #  organization
+    pack [label $f.org_lebel -text Organization:] -side left
+    pack [label $f.org -width 8 -anchor w \
+	      -textvariable config(OneDrive,org,displayName)] -side left
+    
+    # Tools frame
+    pack [set f [frame $w.tools]] -fill x
+
+    pack [button $f.clear -text Clear \
+	      -command {clear $config(odopen,logWidget)}] \
+	-side left
+    
+    # log window
+    pack [scrollbar $w.hscroll -orient horizontal -command [list $w.log xview]] \
+	-side bottom -fill x
+    pack [scrollbar $w.vscroll -command [list $w.log yview]] \
+	-side right  -fill y
+    pack [listbox $w.log -relief sunken -bd 2 \
+	      -yscrollcommand [list $w.vscroll set] \
+	      -xscrollcommand [list $w.hscroll set] \
+	      -height 20 ] \
+	-expand 1 -fill both
+
+    set config(odopen,logWidget) $w.log
+
+    focus .line.commandline
+}
+#
+# Start Up
+#
+proc getUserData {} {
+    global config
+
+    log get user data..
+    set d [json2dict [graph::GET me]]
+    foreach key {displayName givenName surName mail userPrincipalName} {
+	if {[catch {dict get $d $key} value]} {
+	    set value ""
+	}
+	set config(OneDrive,me,$key) $value
+    }
+    
+    # If there is no display name, try to construct one
+    #  from firstname lastname
+    if {![string length $config(OneDrive,me,displayName)]} {
+	append config(OneDrive,me,displayName) \
+	    $config(OneDrive,me,givenName) \
+	    " " \
+	    $config(OneDrive,me,surName)
+    }
+    #  or from the email address
+    if {$config(OneDrive,me,displayName) eq " "} {
+	set config(OneDrive,me,displayName) \
+	    [lindex [split $config(OneDrive,me,mail) @] 0]
+    }
+}
+proc getOrgData {} {
+    global config
+    log get organization data..
+    log Note: we are only processing the first entry, there might be more...
+    set d [json2dict [graph::GET organization]]
+    if {[catch {dict get $d value 0 displayName} org]} {
+	log Error: could not get name of organization, setting to OneDrive.
+	set org OneDrive
+    }
+    set config(OneDrive,org,displayName) $org
+}
+
+
+#
+# main
+#
+proc main {} {
+    global config
+
+    screen
+
+    if {[catch {slurp [file join $config(confdir) odopen_token]} token]} {
+	log Error no odopen_token file: $token.
+	log Info: you need to 'Authorize' before you can do anything else.
+    } else {
+	log authCode: $token
+	set config(token) $token
+	getUserData
+	getOrgData
+    }
+}
+
+main
+
+# Emacs:
+# Local Variables:
+# mode: tcl
+# End:
