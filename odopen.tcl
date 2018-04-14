@@ -22,7 +22,7 @@ set config(OneDrive,scope) "user.read files.readwrite files.readwrite.all offlin
 
 set config(access_timeout) 0
 
-set dock_photo_data "R0lGODdhFAAUAKECABh0zR13zv///////ywAAAAAFAAUAAACQZSAqRZolt5xD0gqod42V9iFVXSJ
+set odmon_app_photo "R0lGODdhFAAUAKECABh0zR13zv///////ywAAAAAFAAUAAACQZSAqRZolt5xD0gqod42V9iFVXSJ
 5TJuoIKxlPvCK6uisgeOdl6jx4ojTXQ8D2nhmxwjMNdM1wSenEqccvfJJHUFADs="
 
 # Libraries
@@ -583,7 +583,7 @@ proc screen {} {
     
     # create main window
     wm title . odopen
-    wm iconphoto . [image create photo -data $::dock_photo_data]
+    wm iconphoto . [image create photo -data $::odmon_app_photo]
     
     # https://wiki.tcl.tk/9984
     bindtags . [list . bind. [winfo class .] all]

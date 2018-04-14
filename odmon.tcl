@@ -220,10 +220,10 @@ if {$config(X)} {
 		#define tray_icon_20x20_1_height 20
 		static unsigned char tray_icon_20x20_1_bits[] = {
 		    0x03, 0x30, 0x0e, 0xf1, 0x78, 0x0f, 0xfc, 0xdb,
-		    0x0d, 0xfe, 0x9b, 0x0d,	0x0e, 0x9f, 0x0d, 0x07,
+		    0x0d, 0xfe, 0x9b, 0x0d, 0x0e, 0x9f, 0x0d, 0x07,
 		    0x9e, 0x0d, 0x03, 0x1c, 0x00, 0x03, 0x0c, 0x00,
 		    0x03, 0xec, 0x00, 0x03, 0xfe, 0x03, 0x07, 0x36,
-		    0x07, 0x07, 0x37, 0x0e,	0x8f, 0x73, 0x0c, 0xfc,
+		    0x07, 0x07, 0x37, 0x0e, 0x8f, 0x73, 0x0c, 0xfc,
 		    0x63, 0x08, 0xf0, 0x60, 0x08, 0x00, 0x60, 0x08,
 		    0x03, 0x60, 0x0c, 0x07, 0x30, 0x0e, 0x1f, 0xb0,
 		    0x07, 0x3f, 0xfc, 0x01 };
@@ -458,10 +458,7 @@ proc screen {} {
     wm title . odmon
     wm iconphoto . [image create photo -data $::odmon_app_photo]
     
-    # close channels/kill subprocesses when closing odmon
-    # https://wiki.tcl.tk/9984
-    bindtags . [list . bind. [winfo class .] all]
-    bind bind. <Destroy> reap
+    wm protocol . WM_DELETE_WINDOW toggle_state
 
     # top frame
     pack [set w [frame .top -borderwidth 10]] -fill x
@@ -474,6 +471,11 @@ proc screen {} {
 	-side left -expand 1 -fill x
     bind $w.commandline "<Return>" repl
 
+    pack [button $w.exit -text Quit \
+	      -command {shutdownInteractive true}] \
+	-side right
+
+    
     # intermezzo to get back/foreground color
     set config(label,background) [$w.label cget -background]
     set config(label,foreground) [$w.label cget -foreground]
@@ -502,7 +504,7 @@ proc screen {} {
     pack [button $f.clear -text Clear \
 	      -command {clear $config(odmon,logWidget)}] \
 	-side left
-    
+        
     # log window
     pack [scrollbar $w.hscroll -orient horizontal -command [list $w.log xview]] \
 	-side bottom -fill x

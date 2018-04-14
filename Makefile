@@ -6,11 +6,11 @@
 DESTDIR=/usr/local/bin
 ICONDIR=/usr/local/share/odmon
 
-ARTEFACTS=dock_icon.gif dock_icon.xbm README.html
+ARTEFACTS=odmon_icon.gif odmon_icon.xbm README.html
 
 BINS=odmon.tcl odopen.tcl
 XDGS=odmon-odmon.desktop odmon-odopen.desktop
-ART=dock_icon.gif
+ART=odmon_icon.gif
 
 help:
 	@echo install: install *odmon*.  Binaries go into $(DESTDIR)
@@ -22,8 +22,8 @@ help:
 
 req:
 	@echo html: markdown
-	@echo dock_icon.gif: ImageMagick
-	@echo dock_icon.xbm: ImageMagick
+	@echo odmon_icon.gif: ImageMagick
+	@echo odmon_icon.xbm: ImageMagick
 
 all:	$(ARTEFACTS)
 
