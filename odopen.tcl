@@ -244,17 +244,17 @@ proc graph::requestAuthorization {} {
     append url redirect_uri=$redirectUrl
     log $url
     log Copy the resulting URL from the Browser to the 'Authorize' text entry and press the button again.
-    if {[catch {exec x-www-browser $url} err]} {
+    if {[catch {exec x-www-browser $url&} err]} {
 	log Error: $err
     } else {
-	log browser launched.
+	# week Tcl-Fu: I thought that $err holds the pid here...
+	log browser launched with pid $err.
     }
 }
 proc graph::Authorize url {
     global config
     variable redirectUrl
     variable tokenUrl
-
 
     set query [lindex [split $url ?] 1]
     set code ""
@@ -283,11 +283,12 @@ proc graph::Authorize url {
     set expiry [dict get $result expires_in]
     set config(access_timeout) [expr {[clock seconds] + $expiry}]
     log (re)writing refresh_token
+    file mkdir $config(confdir)
     if {[catch {spit \
-		    [file join ~ .config onedrive odopen_token] \
+		    [file join ~ $config(confdir) refresh_token] \
 		    [dict get $result refresh_token]} \
 	     err]} {
-	log Error: could not write odopen_token: $err
+	log Error: could not write refresh_token: $err
     }
 }
 proc graph::RefreshToken {} {
@@ -717,8 +718,8 @@ proc main opts {
 
     screen
     options $opts
-    if {[catch {slurp [file join $config(confdir) odopen_token]} token]} {
-	log Error no odopen_token file: $token.
+    if {[catch {slurp [file join $config(confdir) refresh_token]} token]} {
+	log Error no refresh_token file: $token.
 	log Info: you need to 'Authorize' before you can do anything else.
     } else {
 	log authCode: $token
