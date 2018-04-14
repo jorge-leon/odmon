@@ -297,6 +297,21 @@ proc notify_changes {drive destination line} {
     return $line
 }
 
+proc drive_config drive {
+    # parse drive configuration return it as a dict and also store it
+    # in the config array
+
+    global config
+
+    iniParse \
+	[slurp [file join $config($drive,confdir) config]] \
+	drive_config
+    if {![info exists drive_config(sync_dir)]} {
+	set drive_config(sync_dir) ~/OneDrive
+    }
+    set config($drive,config) [array get drive_config]
+}
+
 proc new_drive drive {
     global config
        
@@ -319,6 +334,7 @@ proc new_drive drive {
     set config($drive,PID) [pid $f]
     set config($drive,uploading) false
     set config($drive,xterm) 0; # pid of xterm process
+    log [drive_config $drive]
     
     if {$config(X)} {
 	set config($drive,tab) [new_drive_tab $drive]
@@ -371,6 +387,15 @@ proc new_drive_tab drive {
     pack [label $w.pid_label -text pid:] -side left
     pack [label $w.pid  -width 7 -textvariable ::config($drive,PID)] -side left
     
+    #   z-base-32 id
+    pack [label $w.id_label -text id:] -side left
+    pack [label $w.id  -text $drive] -side left
+
+    #   sync directory
+    set dir [dict get $config($drive,config) sync_dir]
+    pack [label $w.dir_label -text dir:] -side left
+    pack [label $w.dir  -text [string trim $dir \"]] -side left
+        
     # tools frame
     pack [set w [frame .tabs.$drive.tools]] -fill x
 
