@@ -3,21 +3,7 @@
     exec tclsh "$0" ${1+"$@"}
 
 # (c) 2018 Georg Lehner <jorge-odmon@at.anteris.net>
-# Share and use it as you like, but don't blame me-
-# leg20180315
-# leg20180320:
-# - remove all http stuff for drive detection
-# - remove memory monitor
-# - log to file
-# - remove log widget for drives
-# - add button to launch tail -F in an xterm
-# - try hard to find xterm executable
-#
-# Drive detection is now factored out from odmon.tcl, odopen.tcl is the
-# original odmon.tcl and should be trimmed for drive detection.
-# leg20180321:
-# - can read configfile ~/.config/onedrive/odmon.conf, see sample file
-#   for syntax and parameters
+# Share and use it as you like, but don't blame me.
 
 # ToDo:
 #
@@ -26,15 +12,9 @@
 #   to be started on program start.
 # - be able to resync drive.
 # - rotate logs
-#
-# - Add new drives
-#   - by hand, giving parameters
-#   - via odopen:// url from browser.
-# - Configure drives via gui
-#   - enable, skip
-#   - directories to sync
 
-set version 0.1.3
+
+set version 0.2
 
 set commandline ""
 
@@ -51,7 +31,7 @@ set config(X) \
 if {$config(X)} {
 
     set config(tray,balloon,timeout) 3000; # milliseconds
-    set config(tray,warn,timeout) 1000; # milliseconds
+    set config(tray,warn,timeout) 5000; # milliseconds
 
     set config(tray) [expr {![catch {package require tktray}]}]
 
@@ -177,7 +157,7 @@ if {!$config(X)} {
 }
 
 # log files
-proc unfiltered {inch out line} {puts $out $line}
+proc unfiltered {drive outch line} {puts $outch $line}
 
 proc pipeto {drive {filter unfiltered}} {
     global config
@@ -190,7 +170,7 @@ proc pipeto {drive {filter unfiltered}} {
 	}
 	return
     }
-    $filter $inch $config($drive,logfd) $line
+    $filter $drive $config($drive,logfd) $line
 }
 
 if {$config(X)} {
@@ -252,13 +232,20 @@ set config(onedrive,changelog,strings) {
     {Trying to restore the upload session ...}
     {Continuing the upload session ...}
     {Deleting *}
+    {Creating folder *}
 }
 
-proc notify_changes {drive destination line} {
+proc notify_changes {drive outch line} {
     global config
 
-    if {!$config(tray)}  {return $line}
+    if {[string equal -length 4 ??:? $line]} {
+	log Error: monitor failing for drive: $config($drive,name)
+    }
+    
+    if {!$config(tray)}  {puts $outch $line}
 
+    puts "$drive: $line"
+    
     set found false
     foreach prefix $config(onedrive,changelog,strings) {
 	if {[string match $prefix $line]} {
@@ -274,7 +261,7 @@ proc notify_changes {drive destination line} {
 	if {$config(tray,uploading)==0} {
 	    reset_tray
 	}
-	return $line
+	return
     }
 
     if {[llength $config(tray,warn,active)]} {
@@ -287,14 +274,15 @@ proc notify_changes {drive destination line} {
 	    set config($drive,uploading) true
 	    incr config(tray,uploading)
 	}	
-	return $line
+	puts $outch $line
+	return
     }
-        
+
     ::img::bitmap::tray_icon configure -foreground gold
     set config(tray,warn,active) \
 	[after $config(tray,warn,timeout) reset_tray]
     
-    return $line
+    puts $outch $line
 }
 
 proc drive_config drive {
@@ -342,7 +330,7 @@ proc new_drive drive {
     
     fconfigure $f -blocking false
     #|| add a modified notify_changes as filter
-    fileevent $f readable [list pipeto $drive]
+    fileevent $f readable [list pipeto $drive notify_changes]
 
 }
 
