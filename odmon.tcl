@@ -482,8 +482,15 @@ proc screen {} {
     wm state . $config(window,state)
     wm title . odmon
     wm iconphoto . [image create photo -data $::odmon_app_photo]
-    
-    wm protocol . WM_DELETE_WINDOW toggle_state
+
+    if {$config(tray)} {
+	wm protocol . WM_DELETE_WINDOW toggle_state
+    } else {
+	# close channels/kill subprocesses when closing odmon
+	# https://wiki.tcl.tk/9984
+	bindtags . [list . bind. [winfo class .] all]
+	bind bind. <Destroy> reap
+    }
 
     # top frame
     pack [set w [frame .top -borderwidth 10]] -fill x
