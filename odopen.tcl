@@ -13,9 +13,6 @@ package require http
 package require tls
 http::register https 443 [list ::tls::socket]
 
-lappend auto_path [file join [pwd] ton]
-set config(use_json2dict) [catch {package require ton}]
-
 set commandline ""
 
 set config(confdir) [file join ~ .config onedrive]
@@ -69,35 +66,156 @@ proc z-base-32-check str {
 #
 # JSON
 #
-if {$config(use_json2dict)} {
-    # https://wiki.tcl.tk/13419
-    proc json2dict JSONtext {
-	string range \
-	    [string trim \
-		 [string trimleft \
-		      [string map {\t {} \n {} \r {} , { } : { } \[ \{ \] \}} $JSONtext
-		      ] {\uFEFF}
-		 ]
-	    ] 1 end-1
+# taken from ton version 0.4
+namespace eval ton {}
+proc ton::json2ton json {
+    set i [trr $json [string length $json]]
+    if {!$i} {return ""}
+    lassign [jscan $json $i] i ton
+    if {[set i [trr $json $i]]} {
+	error "json string invalid:[incr i -1]: left over characters."
     }
-} else {
-    # ton
-    proc json2dict json {
-	set maxlen 70
-	if {[catch  {::ton::json2ton $json} ton]} {
-	    log error: json2dict $ton: $json
-	    return
-	}
-	set d [namespace eval ton::a2dict $ton]
-	dict for {key value} $d {
-	    if {[string length $value]>$maxlen} {
-		set value [string range $value 0 $maxlen]..
-	    }
-	    log json2dict: ${key}: $value
-	}
-	return $d
+    return $ton
+}
+proc ton::trr {s i} {
+    while {[set j $i] &&
+	   ([string is space [set c [string index $s [incr i -1]]]]
+	    || $c eq "\n")} {}
+    return $j
+}
+proc ton::jscan {json i {d :}} {
+    incr i -1
+    if {[set c [string index $json $i]] eq "\""} {
+	str $json [incr i -1]
+    } elseif {$c eq "\}"} {
+	obj $json $i
+    } elseif {$c eq "\]"} {
+	arr $json $i
+    } elseif {$c in {e l}} {
+	lit $json $i
+    } elseif {[string match {[0-9.]} $c]} {
+	num $json $i $c $d
+    } else {
+	error "json string end invalid:$i: ..[string range $json $i-10 $i].."
     }
-    
+}
+proc ton::num {json i c d} {
+    set float [expr {$c eq "."}]
+    for {set j $i} {$i} {incr i -1} {
+	if {[string match $d [set c [string index $json $i-1]]]} break
+	set float [expr {$float || [string match "\[eE.]" $c]}]
+    }
+    set num [string trimleft [string range $json $i $j]]
+    if {!$float && [string is entier $num]} {
+	    list $i "i $num"
+    } elseif {$float && [string is double $num]} {
+	list $i "d $num"
+    } else {
+	error "number invalid:$i: $num."
+    }
+}
+proc ton::lit {json i} {
+    if {[set c [string index $json $i-1]] eq "u"} {
+	list [incr i -3] "l true"
+    } elseif {$c eq "s"} {
+	list [incr i -4] "l false"
+    } elseif {$c eq "l"} {
+	list [incr i -3] "l null"
+    } else {
+	set e [string range $json $i-3 $i]
+	error "literal invalid:[incr i -1]: ..$e."
+    }
+}
+proc ton::str {json i} {
+    for {set j $i} {$i} {incr i -1} {
+	set i [string last \" $json $i]
+	if {[string index $json $i-1] ne "\\"} break
+    }
+    if {$i==-1} {
+	error "json string start invalid:$i: exhausted while parsing string."
+    }
+    list $i "s [list [string range $json $i+1 $j]]"
+}
+proc ton::arr {json i} {
+    set i [trr $json $i]
+    if {!$i} {
+	error "json string invalid:0: exhausted while parsing array."
+    }
+    if {[string index $json $i-1] eq "\["} {
+	return [list [incr i -1] a]
+    }
+    set r {}
+    while {$i} {
+	lassign [jscan $json $i "\[,\[]"] i v
+	lappend r \[$v\]
+	set i [trr $json $i]
+	incr i -1
+	if {[set c [string index $json $i]] eq ","} {
+	    set i [trr $json $i]
+	    continue
+	} elseif {$c eq "\["} break
+	error "json string invalid:$i: parsing array."
+    }
+    lappend r a
+    return [list $i [join [lreverse $r]]]
+}
+proc ton::obj {json i} {
+    set i [trr $json $i]
+    if {!$i} {
+    	error "json string invalid:0: exhausted while parsing object."
+    }
+    if {[string index $json $i-1] eq "\{"} {
+	return [list [incr i -1] o]
+    }
+    set r {}
+    while {$i} {
+	lassign [jscan $json $i] i v
+	set i [trr $json $i]
+	incr i -1
+	if {[string index $json $i] ne ":"} {
+	    error "json string invalid:$i: parsing key in object."
+	}
+	set i [trr $json $i]
+	lassign [jscan $json $i] i k
+	lassign $k type k
+	if {$type ne "s"} {
+	    error "json string invalid:[incr i -1]: key not a string."
+	}
+	lappend r \[$v\] [list $k]
+	set i [trr $json $i]
+	incr i -1
+	if {[set c [string index $json $i]] eq ","} {
+	    set i [trr $json $i]
+	    continue
+	} elseif {$c eq "\{"} break
+	error "json string invalid:$i: parsing object."	
+    }
+    lappend r o
+    return [list $i [join [lreverse $r]]]
+}
+# original: ton::a2dict
+foreach type {i d l s} {proc ton::$type v {return $v}}
+proc ton::a args {
+    set i -1; set r {}
+    foreach v $args {lappend r [incr i] $v}
+    return $r
+}
+proc ton::o args {return $args}
+#
+proc json2dict json {
+    set maxlen 70
+    if {[catch  {::ton::json2ton $json} ton]} {
+	log error: json2dict $ton: $json
+	return
+    }
+    set d [namespace eval ton $ton]
+    dict for {key value} $d {
+	if {[string length $value]>$maxlen} {
+	    set value [string range $value 0 $maxlen]..
+	}
+	log json2dict: ${key}: $value
+    }
+    return $d
 }
 #
 # REST
@@ -591,7 +709,6 @@ proc options opts {
 	set config(opts,url) [lindex $opts 0]
     }
 }
-
 #
 # main
 #
@@ -599,10 +716,7 @@ proc main opts {
     global config
 
     screen
-
     options $opts
-    
-    
     if {[catch {slurp [file join $config(confdir) odopen_token]} token]} {
 	log Error no odopen_token file: $token.
 	log Info: you need to 'Authorize' before you can do anything else.
