@@ -5,12 +5,15 @@
 
 DESTDIR=/usr/local/bin
 ICONDIR=/usr/local/share/odmon
-DDAPPDIR=/usr/local/share/applications
 
 ARTEFACTS=dock_icon.gif dock_icon.xbm README.html
 
+BINS=odmon.tcl odopen.tcl
+XDGS=odmon-odmon.desktop odmon-odopen.desktop
+ART=dock_icon.gif
+
 help:
-	@echo install: install odmon.tcl into $(DESTDIR)
+	@echo install: install *odmon*.  Binaries go into $(DESTDIR)
 	@echo html: convert README.md into README.html
 	@echo all: create artefacts: image files and README.html
 	@echo clean: remove artefacts
@@ -24,13 +27,33 @@ req:
 
 all:	$(ARTEFACTS)
 
-install: odmon.tcl dock_icon.gif odmon.desktop
-	cp $< $(DESTDIR)
-	chmod +x $(DESTDIR)/$<
+install-bin: $(BINS)
+	for f in $(BINS); do \
+		cp $$f $(DESTDIR); \
+		chmod +x $(DESTDIR)/$$f; \
+	done
+
+install-xdg: $(XDGS)
+	for f in $(XDGS); do xdg-desktop-menu install $$f; done
+
+install-art: $(ART)
 	mkdir -p $(ICONDIR)
-	cp dock_icon.gif $(ICONDIR)
-	mkdir -p $(DDAPPDIR)
-	cp odmon.desktop $(DDAPPDIR)
+	for f in $(ART); do cp $$f $(ICONDIR); done
+
+install: install-bin install-xdg install-art
+
+
+uninstall-bin:
+	-for f in $(BINS); do rm $(DESTDIR)/$$f; done
+
+uninstall-xdg:
+	-for f in $(XDGS); do xdg-desktop-menu uninstall $$f; done
+
+uninstall-art:
+	-for f in $(ART); do rm $(ICONDIR)/$$f; done
+
+uninstall: uninstall-bin uninstall-xdg uninstall-art
+
 
 html: README.html
 
@@ -49,4 +72,6 @@ mrproper: clean
 %.xbm:	%.xcf
 	convert -negate $< $@
 
-.PHONY: help install html req clean mrproper
+.PHONY: help html req clean mrproper \
+	install install-bin install-xdg install-art \
+	uninstall uninstall-bin uninstall-xdg uninstall-art

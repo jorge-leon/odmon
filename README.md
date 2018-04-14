@@ -9,36 +9,37 @@ Share and use it as you like, but don't blame me.
 What is it
 ----------
 
-[onedrive](https://github.com/skilion/onedrive/) is a command line
-application, capable of syncing the files of a Microsoft OneDrive
-account.  We have
-[created patches](https://github.com/jorge-leon/onedrive) which allow
-for better selection of what to sync, and to sync drives shared via
-Office 365 Enterprise or Education.
+[onedrive][] is a command line application, capable of syncing the
+files of a Microsoft OneDrive account.  We have
+[created patches][our_onedrive] which allow for better selection of
+what to sync and syncing drives shared via Office 365 Enterprise or
+Education.
 
 The *onedrive* program only syncs one drive at once, but you can run
 several instances of *onedrive* to sync several drives.
 
-[*odmon*](http://at.magma-soft.at/darcs/odmon) is a Tcl script, which
-picks up all configured drives and runs *onedrive* for each of them.
-It presents an icon in the system tray which indicates synchronization
-activity and can be used to hide/unhide the main window.
+[odmon][] is a collection of Tcl scripts which ease the task of
+configuring and running this collection of *onedrive* processes.
 
-*odopen* is a Tcl script, which has functionality for retrieving the
-driveId of a shared directory in SharePoint and set it up as a new
-drive for *odmon*.
+`odopen.tcl` Helps to create the required authorization tokens and
+configures drives from SharePoint URLs
+
+`odmon.tcl` picks up all configured drives and runs *onedrive* for
+each of them.  It presents an icon in the system tray which indicates
+synchronization activity and can be used to hide/unhide the main
+window.
 
 
 How to install
 --------------
 
-### Testing
+### Requisites and manual testing
 
-*odmon* is a single Tcl script, just copy it to your disk and run it.
-The same is valid for *odopen*
+*odmon* and *odopen* are single file Tcl script with all required code
+included.  They need no privileges and can be run directly by hand,
+without any installation procedure.
 
-
-Requisites:
+Software requisites for *odmon*:
 
 - Debian GNU/Linux 9.3
 - Patched *onedrive*
@@ -49,39 +50,32 @@ It is very likely, that *odmon* will run successfully on a wide range
 of variants of the above, with no or little changes.  Please report
 success and failure on yours.
 
+Requisities for the automated installation:
 
-### Complete Installation
+- make - optional for installing the application
+- ImageMagick - optional for creating the application icon
+- xdg-desktopmenu - optional  
+  for installing the protocol handler and the menu entries
+- markdown - for creating the html version of this document.
 
-*odmon* now features support for the freedesktop.org Desktop Entry
+
+### Installation
+
+*odmon* features support for the freedesktop.org Desktop Entry
 specification and such integrates with compliant
-distributions/desktops.  We line out, how to install *odmon* for
-Debian GNU/Linux 9.3
+distributions/desktops.
 
 Copy the complete *odmon* distribution directory on your computer,
-open a commandline shell and enter the directory.
+open a commandline shell and enter the directory, then run:
 
-````
-sudo cp odmon.tcl /usr/local/bin
-sudo cp odopen.tcl /usr/local/bin
-sudo xdg-desktop-menu install odmon-odmon.desktop
-sudo xdg-desktop-menu install odmon-odopen.desktop
-````
+	sudo make install
 
-To get the icon you must have ImageMagick installed, we need the
-`convert` command.  And we need of course `make`.
+This will copy the scripts to `/usr/local/bin`, the application icon
+to `/usr/local/share/odmon/` and run `xdg-desktop-menu` with the two
+desktop files for *odmon* and *odopen*.
 
-````
-make dock_icon.gif
-sudo mkdir /usr/local/share/odmon
-sudo cp dock_icon.gif /usr/local/share/odmon
-````
-
-Ooops, I forgot: You **must** install *ton* and make it available to
-*odmon* in order for this to work.  See the section [Status of odopen]
-for instructions.
-
-We will integrate *ton* soon into *odmon* so that no extra step will
-be needed.
+You can tweak the `Makefile` or do all wanted steps by hand if you
+have other requirements.
 
 
 How to use
@@ -106,25 +100,24 @@ If the tktray package can be loaded, *odmon* installs a tray icon
 which can be used to show/hide the main window (left click) and to
 exit the program (double right click).
 
-If tktray is not available the main window show up.
+If tktray is not available the main window shows up.  If tktray is
+installed and working, the *odmon* tray icon shows up in the system
+tray and the *odmon* main window is hidden.  You can open the main
+window with a single click, and close the application with a double
+right click on the tray icon.  You will be asked for confirmation.
 
 The main window has an 'odmon' tab, with a log window for the
 application.  For each configured drive, a new tab with a 'Show Log'
 button is added. This button opens a terminal emulator window showing
 the running log.
 
-If the system tray is working, you will get the odmon tray icon, the
-*odmon* main window is hidden.  You can open the main window with a
-single click, and close the application with a double right click on
-the tray icon.  You will be asked for confirmation.
-
 There is a `Command:` entry box on the top of them main windows, which
 allows to execute arbitrary Tcl commands inside the interpreter
 running *odmon*.
 
 
-The configuration file
-----------------------
+The *odmon* configuration file
+-------------------------------
 
 After detecting all subdirectories of `~/.config/onedrive` *odmon*
 tries to read the file `~ /.config/onedrive/odmon.conf`.  You can
@@ -162,11 +155,12 @@ section.
 :window,state:
 :    set to `normal` if you want to show the main window on startup
 
+
 Adding new drives
 -----------------
 
 The `odopen.tcl` script is a utility to parse a SharePoint drive URL
-and add a *odmon* configuration for it.
+and add a *onedrive* configuration for it.
 
 To add a new drive, open a SharePoint website, select the `Documents`
 section and click on `Synchronization`.  If you have made the
@@ -187,37 +181,29 @@ allows to execute arbitrary Tcl commands inside the interpreter
 running *odopen*.
 
 
-Status of odmon
----------------
+Status of *odmon*
+-----------------
 
-*odmon* is a bunch of hastily glued together routines. This is the
-third release to the public.
-
-Since you read the license, I do not need to over stress that it is
+*odmon* is a bunch of hastily glued together routines.  Since you
+already read the license, there is no need to overstress that it is
 your fault if you loose data or anything consequential by using
 *odmon*.
 
+At this moment a lot of desirable fancy features are missing and I
+have left interactive debugging features in the GUI, so I can play
+around to see how to implement them.  This makes the programs somewhat
+ugly and unelegant; ok, better let's say they are nerdy.
 
-Status of odopen
-----------------
+That said, *odmon* does it's basic job in my environment.  No effort
+has been put into *odmon* to make it resiliant to failure conditions
+like network interruptions or unexpected responses from the Microsoft
+Graph API.
 
-We used the `json2dict` oneliner from the Tcler's wiki to parse out
-the driveID.  `json2dict` destroys URLs and is therefore not suited
-for further development.
+I'll be more then happy to receive feedback and adapt *odmon* to a
+broader range of environments.
 
-In order to continue `odopen.tcl` development we have "selected" the
-*ton* JSON parser.  Currently you have to install it by hand, if you
-want to use it:
-
-- Download *ton* from the
-  [repository](http://at.magma-soft.at/cgi-bin/darcsweb.cgi?r=ton;a=summary)
-
-- Copy or symlink the `ton` directory as a subdirectory of the one
-  where you are running `odmon.tcl`
-
-If you want to know how and why *ton* see this
-[post](http://at.magma-soft.at/sw/blog/posts/Reverse_JSON_parsing_with_TCL/).
-
+**Plug**: Tip me if you want to improve *onedrive* or *odmon* but
+cannot or do not want to do it by yourself.
 
 ToDo
 ----
@@ -237,11 +223,8 @@ ToDo
   * does multiple syncs by itself or
   * factors out some data
 
-**Plug**: Tip me if you want to improve *onedrive* or *odmon* but
-cannot or do not want to do it by yourself.
 
-
-How are things done
+How things are done
 -------------------
 
 ### Synchronization directory
@@ -264,10 +247,10 @@ Each additional drive is configured as a sub directory of
 `~/.config/onedrive`, the latter is the *onedrive* default
 for the personal drive.
 
-The directory name is the `SITE` string, encoded conveniently with
-z-base-32 which is pure lowercase ASCII, so any string for `SITE` will
-work out.  Unincidentially lowercase also happens to be a requirement
-for Tk window names (lowercase).
+The directory name is the `SITE` string, encoded with z-base-32 which
+is pure lowercase ASCII, so any string for `SITE` will work out.
+Unincidentially lowercase also happens to be a requirement for Tk
+window names (lowercase).
 
 The z-base-32 encoder/decoder implementation is rather keen: don't use
 it on large volumes of data.  It is also untested.
@@ -283,6 +266,9 @@ fake the User-Agent string. Easy, isn't it?
 Currently we only hijack the clientId and handle the refresh token
 ourselves, since we need more privileges in *odopen*, in order to read
 the Organization name.
+
+We use the *ton* JSON parser, see this [post][ton].  if you want to
+know something about it.
 
 
 ### Dock and window Icon
@@ -308,3 +294,16 @@ Credits
 All credits go to skillion for *onedrive* and to Jon Ousterhout and
 fellows for Tcl/Tk and the incredible Tlcer's Wiki.  Thanks to Per
 Öberg for his feedback on the very first version.
+
+
+[onedrive]: https://github.com/skilion/onedrive/
+class="external"
+
+[our_onedrive]: https://github.com/jorge-leon/onedrive
+class="external"
+
+[odmon]: http://at.magma-soft.at/darcs/odmon
+
+[ton]:
+http://at.magma-soft.at/sw/blog/posts/Reverse_JSON_parsing_with_TCL/
+
