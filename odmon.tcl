@@ -7,14 +7,10 @@
 
 # ToDo:
 #
-# - reestablish tray icon animation via logfile filter
-# - start/stop drive: use $config($drive,enable) to decide if drive has
-#   to be started on program start.
-# - be able to resync drive.
 # - rotate logs
 
 
-set version 0.2
+set version 0.3
 
 set commandline ""
 
@@ -166,7 +162,12 @@ proc pipeto {drive {filter unfiltered}} {
     if {[gets $inch line]==-1} {
 	if {[eof $inch]} {
 	    close $inch
-	    set config($drive,chan) {}
+	    log drive process finished:$config($drive,name): $config($drive,PID)
+	    set config($drive,chan) ""
+	    set config($drive,PID) ""
+	    # In case we have been resyncing we reset here to normal mode
+	    set config($drive,mode) monitor
+	    updateSSButton $drive
 	}
 	return
     }
@@ -244,7 +245,7 @@ proc notify_changes {drive outch line} {
     
     if {!$config(tray)}  {puts $outch $line}
 
-    puts "$drive: $line"
+    puts "$config($drive,name): $line"
     
     set found false
     foreach prefix $config(onedrive,changelog,strings) {
@@ -295,43 +296,117 @@ proc drive_config drive {
 	[slurp [file join $config($drive,confdir) config]] \
 	drive_config
     if {![info exists drive_config(sync_dir)]} {
-	set drive_config(sync_dir) ~/OneDrive
+	if {$drive eq "me"} {
+	    set drive_config(sync_dir) ~/OneDrive
+	} else {
+	    error "sync_dir not configured"
+	}
     }
     set config($drive,config) [array get drive_config]
 }
 
-proc new_drive drive {
+proc start_drive {drive {mode config}} {
+    # start a onedrive process for drive
+    #
+    # mode .. monitor | resync
+    
     global config
-       
+
+    if {$mode eq "config"} {set mode $config($drive,mode)}
+
+    switch -exact -- $mode {
+	monitor {set param -m}
+	resync {set param --resync}
+	default {
+	    log error: wrong drive mode specified: $mode
+	    return
+	}
+    }
     if {[catch {open $config($drive,logfile) a} l]} {
 	log error opening logfile, logging to stderr: $l
 	set l stderr
     } else {
 	fconfigure $l -buffering line
     }
-    
-    set* cmd onedrive --confdir $config($drive,confdir) -m -v
+    set config($drive,logfd) $l
+
+    set* cmd onedrive --confdir $config($drive,confdir) $param -v
     puts $l "starting: [join $cmd]"
 
     if {[catch {open "| [join $cmd] 2>@1" r+} f]} {
 	log error running monitor, giving up: $f 
 	return
     }
+    fconfigure $f -blocking false
+    fileevent $f readable [list pipeto $drive notify_changes]
+
     set config($drive,chan) $f
-    set config($drive,logfd) $l
     set config($drive,PID) [pid $f]
-    set config($drive,uploading) false
-    set config($drive,xterm) 0; # pid of xterm process
-    log [drive_config $drive]
+
+    updateSSButton $drive
     
+    return
+}
+
+proc stop_drive drive {
+    # Caution! this is not thought through.  There might be a lot of
+    # things which are not deinitialized.
+    
+    global config
+
+    if {![string length $config($drive,PID)]} {
+	log warning: no process for $config($drive,name), not stopping
+	log note: chan:$config($drive,name): $config($drive,chan).
+	return
+    }
+
+    log stopping drive:$config($drive,name): $config($drive,PID)
+    puts $config($drive,logfd) "stopping drive:$config($drive,name): $config($drive,PID)"
+    
+    close $config($drive,chan)
+    set config($drive,chan) ""
+    set config($drive,PID) ""
+
+    updateSSButton $drive
+}
+
+proc updateSSButton drive {
+
+    global config
+
+    if {!$config(X)} return
+    
+    if {[string length $config($drive,PID)]} {
+	set b_text "Stop"
+	set b_cmd [list stop_drive $drive]
+    } else {
+	set b_text "Start"
+	set b_cmd [list start_drive $drive]
+    }
+    $config($drive,ssButton) configure \
+	-text $b_text \
+	-command $b_cmd
+}
+
+proc new_drive drive {
+    global config
+
+    if {[catch {drive_config $drive} c]} {
+	log error incorrect drive configuration, not starting :$config($drive,name): $c
+	set config($drive,start) false
+    } else {
+	log drive configuration:$config($drive,name): $c
+    }
+
     if {$config(X)} {
 	set config($drive,tab) [new_drive_tab $drive]
     }
-    
-    fconfigure $f -blocking false
-    #|| add a modified notify_changes as filter
-    fileevent $f readable [list pipeto $drive notify_changes]
 
+    if {$config($drive,start)} {
+	start_drive $drive
+    } else {
+	updateSSButton $drive
+    }
 }
 
 proc show_log drive {
@@ -391,6 +466,24 @@ proc new_drive_tab drive {
     pack [button $w.show_log -text "Show Log" \
 	      -command [list show_log $drive]] \
 	-side left
+
+    #  Resync radiobutton
+    pack [radiobutton $w.resync -variable config($drive,mode) \
+	      -text resync \
+	      -value resync] \
+	-side left
+    #  Monitor radiobutton
+    pack [radiobutton $w.monitor -variable config($drive,mode) \
+	      -text monitor \
+	      -value monitor] \
+	-side left
+
+    #  Start/Stop button
+    pack [button $w.start_stop -text "--" \
+	      -command [list log error unconfigured ssButton]] \
+	-side left
+    set config($drive,ssButton) $w.start_stop
+
     
     return .tabs.$drive
 }
@@ -540,38 +633,6 @@ proc screen {} {
     focus .line.commandline
 }
 
-### Main
-
-if {$config(X)} {
-    screen
-    if {$config(tray)} tray
-}
-
-# personal drive
-set config(drives) me
-set config(names) OneDrive
-set config(me,name) OneDrive
-set config(me,confdir) [file join ~ .config onedrive]
-set config(me,logfile) [file join ~ .config onedrive onedrive.log]
-set config(me,enabled) true
-set config(me,skip) false
-
-# find drive directories
-foreach drive [glob -nocomplain -types d -tails \
-		   -dir [file join ~ .config onedrive] *] {
-    lappend config(drives) $drive
-    set config($drive,confdir) [file join ~ .config onedrive $drive]
-    if {[z-base-32-check $drive]} {
-	set config($drive,name) [string trimright [z-base-32-decode $drive] \0]
-    } else {
-	set config($drive,name) $drive
-    }
-    lappend config(names) $config($drive,name)
-    set config($drive,enabled) true
-    set config($drive,skip) false
-    set config($drive,logfile) [file join $config($drive,confdir) onedrive.log]
-}
-
 # override/add with config file
 proc readIniFile {} {
     global config
@@ -624,12 +685,12 @@ proc readIniFile {} {
 	    set config($drive,confdir) $confdir
 	    set config($drive,name) $section
 	    set config($drive,logfile) [file join $confdir onedrive.log]
-	    set config($drive,enabled) true
+	    set config($drive,start) true
 	    set config($drive,skip) false
 
 	    lappend config(drives) $drive
 	}
-	foreach key {enabled logfile name skip} {
+	foreach key {start logfile name skip} {
 	    if {[info exists odmConfig($section,$key)]} {
 		set config($drive,$key) $odmConfig($section,$key)
 	    }
@@ -639,6 +700,52 @@ proc readIniFile {} {
 		[file join $config($drive,confdir) $config($drive,logfile)]
 	}
     }
+}
+
+### Main
+
+if {$config(X)} {
+    screen
+    if {$config(tray)} tray
+}
+
+# personal drive
+set config(drives) me
+set config(names) OneDrive
+set config(me,name) OneDrive
+set config(me,confdir) [file join ~ .config onedrive]
+
+set config(me,logfile) [file join ~ .config onedrive onedrive.log]
+set config(me,start) true
+set config(me,skip) false
+set config(me,PID) ""
+set config(me,uploading) false
+set config(me,xterm) 0; # pid of xterm process
+set config(me,ssButton) ""; # Start/Stop button
+set config(me,mode) monitor
+
+# find drive directories
+foreach drive [glob -nocomplain -types d -tails \
+		   -dir [file join ~ .config onedrive] *] {
+    lappend config(drives) $drive
+    set config($drive,confdir) [file join ~ .config onedrive $drive]
+    if {[z-base-32-check $drive]} {
+	set config($drive,name) [string trimright [z-base-32-decode $drive] \0]
+    } else {
+	set config($drive,name) $drive
+    }
+    lappend config(names) $config($drive,name)
+
+    # drive default/initial values
+    set config($drive,logfile) [file join $config($drive,confdir) onedrive.log]
+
+    set config($drive,start) true
+    set config($drive,skip) false
+    set config($drive,PID) ""
+    set config($drive,uploading) false
+    set config($drive,xterm) 0; # pid of xterm process
+    set config($drive,ssButton) ""; # Start/Stop button
+    set config($drive,mode) monitor
 }
 
 readIniFile

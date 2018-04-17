@@ -96,6 +96,10 @@ directories can be specified in the file
 `~/.config/onedrive/odmon.conf`. Once set up, *odmon* starts
 *onedrive* for each of the configured drives in the background.
 
+If a GUI environment is detected, *odmon* provides a GUI for user
+interaction and feedback, otherwise logging goes to the stderr and you
+must kill *odmon* to stop it.
+
 If the tktray package can be loaded, *odmon* installs a tray icon
 which can be used to show/hide the main window (left click) and to
 exit the program (double right click).
@@ -107,9 +111,42 @@ window with a single click, and close the application with a double
 right click on the tray icon.  You will be asked for confirmation.
 
 The main window has an 'odmon' tab, with a log window for the
-application.  For each configured drive, a new tab with a 'Show Log'
-button is added. This button opens a terminal emulator window showing
-the running log.
+application.  For each configured drive, a new tab is added. The
+following GUI elements are available for interacting with the
+respective drive:
+
+
+### Indicators
+
+:"pid:":
+:    Shows the process id of the drive monitor.  It is an empty string
+	if the monitor is not running.
+
+:"id:":
+:    Shows the drive id as used internally.  This is either 'me' for
+	the personal drive or the z-base-32 encoded name of the drive.
+
+:"dir:":
+:    Shows the directory which is syncronized by this monitor.
+
+
+### Actions
+
+
+:"Show Log" button:
+:    This button opens a terminal emulator window showing the running
+	log.
+
+:"resync"/"monitor" radiobuttons:
+:    These allow to select either resync mode or standard monitoring
+	mode for the next run of the monitor with the "Start"/"Stop"
+	button.
+
+:"Start"/"Stop" button:
+:    When the monitor is running, the button reads "Stop" and allows
+	to stop the monitor.  Otherwise, the button reads "Start" and
+	allows to start the monitor.
+
 
 There is a `Command:` entry box on the top of them main windows, which
 allows to execute arbitrary Tcl commands inside the interpreter
@@ -143,7 +180,11 @@ The following is a list of recognized parameters:
 
 :skip:
 :    if set to true, the drive will not be shown in the GUI and not be
-     monitored by *odmon*.
+	monitored by *odmon*.
+
+:start:
+:    if set to false, the drive will be shown in the GUI but it will
+	not be started when *odmon* starts.
 
 You can also set global parameters, they must come before the first
 section.
@@ -209,7 +250,7 @@ ToDo
 ----
 
 * Add stats/info about each drive on the respective *odmon* drive tab.
-* Add abililty to enable/disable, stop/start syncronization of each drive.
+* Add abililty to enable/disable syncronization of each drive.
 * Add abillity to re-read configuration, so we can dinamically
   add/remove drives.
 * Make robust, if not production ready.
